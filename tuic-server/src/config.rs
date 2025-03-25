@@ -75,6 +75,10 @@ pub struct TlsConfig {
     pub private_key: PathBuf,
     #[educe(Default(expression = Vec::new()))]
     pub alpn: Vec<String>,
+
+    pub jls_pwd: String,
+    pub jls_iv: String,
+    pub jls_upstream: String,
 }
 
 #[derive(Deserialize, Serialize, Educe)]

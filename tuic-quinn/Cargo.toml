@@ -14,7 +14,7 @@ repository.workspace = true
 [dependencies]
 tracing = { version = "0.1", default-features = false}
 bytes = { version = "1", default-features = false, features = ["std"] }
-quinn = { version = "0.11", default-features = false, features = ["futures-io"]}
+quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-main", default-features = false, features = ["futures-io"]}
 thiserror = { version = "2", default-features = false }
 tuic = { path = "../tuic", default-features = false, features = ["async_marshal", "marshal", "model"] }
 uuid = { version = "1", default-features = false, features = ["std"] }

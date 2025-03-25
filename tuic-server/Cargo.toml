@@ -29,7 +29,7 @@ chashmap = { package = "chashmap-async", version = "0.1" }
 notify = "7"
 
 # QUIC
-quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "log"] }
+quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-main", default-features = false, features = ["log", "runtime-tokio"]}
 
 # TUIC
 tuic = { path = "../tuic", default-features = false }
@@ -40,7 +40,7 @@ register-count = { version = "0.1.0", default-features = false, features = ["std
 tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal"] }
 
 # TLS
-rustls = { version = "0.23", default-features = false }
+rustls = { package = "rustls", git = "https://github.com/spongebob888/rustls-jls", branch = "jls-main", default-features = false, features = ["std"]}
 rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
 rcgen = { version = "0.13", default-features = false, features = ["crypto"] }
 

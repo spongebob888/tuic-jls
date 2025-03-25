@@ -1,3 +1,6 @@
+use crate::error::Error;
+use rustls_jls::{Certificate, RootCertStore};
+use rustls_pemfile::Item;
 use std::{
     fs,
     net::{IpAddr, SocketAddr},
@@ -23,7 +26,7 @@ pub fn load_certs(paths: Vec<PathBuf>, disable_native: bool) -> Result<RootCertS
                 .collect::<Result<_, _>>()
                 .context("invalid PEM-encoded certificate")?
         };
-        certs.add_parsable_certificates(cert_chain);
+        certs.add_parsable_certificates(&cert_chain);
     }
 
     if !disable_native {

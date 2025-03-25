@@ -59,6 +59,8 @@ impl Server {
         // TODO only set when 0-RTT enabled
         crypto.max_early_data_size = u32::MAX;
         crypto.send_half_rtt_data = ctx.cfg.zero_rtt_handshake;
+        crypto.jls_config = rustls::JlsServerConfig::new(&cfg.jls_pwd, &cfg.jls_iv, &cfg.jls_upstream)
+        .expect("Wrong upstream url format");
 
         let mut config = ServerConfig::with_crypto(Arc::new(
             QuicServerConfig::try_from(crypto).context("no initial cipher suite found")?,

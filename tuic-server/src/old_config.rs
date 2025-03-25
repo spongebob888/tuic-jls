@@ -111,6 +111,10 @@ pub struct OldConfig {
     pub gc_lifetime: Duration,
 
     pub restful_server: Option<SocketAddr>,
+    
+    pub jls_pwd: String,
+    pub jls_iv: String,
+    pub jls_upstream: String,
 }
 
 mod default {

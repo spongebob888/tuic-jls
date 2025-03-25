@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
-use quinn::{RecvStream, SendStream, VarInt};
+use quinn_jls::{RecvStream, SendStream, VarInt};
 use register_count::Register;
 use tokio::time;
 use tracing::{debug, warn};
