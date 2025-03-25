@@ -113,6 +113,7 @@ pub struct Relay {
 
     pub jls_pwd: String,   
     pub jls_iv: String,   
+    pub server_name: Option<String>,
 }
 
 #[derive(Deserialize)]

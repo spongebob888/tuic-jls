@@ -116,6 +116,7 @@ impl Connection {
             heartbeat: cfg.heartbeat,
             gc_interval: cfg.gc_interval,
             gc_lifetime: cfg.gc_lifetime,
+            server_name: cfg.server_name,
         };
 
         ENDPOINT
@@ -253,6 +254,7 @@ struct Endpoint {
     heartbeat: Duration,
     gc_interval: Duration,
     gc_lifetime: Duration,
+    server_name: Option<String>,
 }
 
 impl Endpoint {
@@ -281,8 +283,11 @@ impl Endpoint {
                             Error::Socket("failed to rebind endpoint UDP socket", err)
                         })?;
                 }
-
-                let conn = self.ep.connect(addr, self.server.server_name())?;
+                let server_name = match &self.server_name {
+                    Some(name) => name,
+                    None => self.server.server_name(),
+                };
+                let conn = self.ep.connect(addr, server_name)?;
                 let (conn, zero_rtt_accepted) = if self.zero_rtt_handshake {
                     match conn.into_0rtt() {
                         Ok((conn, zero_rtt_accepted)) => (conn, Some(zero_rtt_accepted)),
