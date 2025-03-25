@@ -128,6 +128,7 @@ pub struct Relay {
     pub skip_cert_verify: bool,
     pub jls_pwd: String,   
     pub jls_iv: String,   
+    pub server_name: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -204,6 +204,7 @@ impl Connection {
             heartbeat: cfg.heartbeat,
             gc_interval: cfg.gc_interval,
             gc_lifetime: cfg.gc_lifetime,
+            server_name: cfg.server_name,
         };
 
         ENDPOINT
@@ -342,6 +343,7 @@ struct Endpoint {
     heartbeat: Duration,
     gc_interval: Duration,
     gc_lifetime: Duration,
+    server_name: Option<String>,
 }
 
 impl Endpoint {
