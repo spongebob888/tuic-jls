@@ -3,7 +3,7 @@
 use self::side::Side;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use quinn::{
+use quinn_jls::{
     Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream,
     UnknownStream, VarInt,
 };

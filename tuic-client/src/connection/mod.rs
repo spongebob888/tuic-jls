@@ -6,13 +6,13 @@ use crate::{
 use crossbeam_utils::atomic::AtomicCell;
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
-use quinn::{
+use quinn_jls::{
     congestion::{BbrConfig, CubicConfig, NewRenoConfig},
     ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig,
     TokioRuntime, TransportConfig, VarInt, ZeroRttAccepted,
 };
 use register_count::Counter;
-use rustls::{version, ClientConfig as RustlsClientConfig};
+use rustls_jls::{version, ClientConfig as RustlsClientConfig};
 use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
     sync::{atomic::AtomicU32, Arc},
@@ -64,6 +64,8 @@ impl Connection {
         crypto.enable_early_data = true;
         crypto.enable_sni = !cfg.disable_sni;
 
+        crypto.jls_config = rustls_jls::JlsConfig::new(&cfg.jls_pwd,&cfg.jls_iv);
+  
         let mut config = ClientConfig::new(Arc::new(crypto));
         let mut tp_cfg = TransportConfig::default();
 

@@ -28,9 +28,9 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_users")]
     pub users: HashMap<Uuid, Box<[u8]>>,
 
-    pub certificate: PathBuf,
+    pub certificate: Option<PathBuf>,
 
-    pub private_key: PathBuf,
+    pub private_key: Option<PathBuf>,
 
     #[serde(
         default = "default::congestion_control",
@@ -90,6 +90,10 @@ pub struct Config {
 
     #[serde(default = "default::log_level")]
     pub log_level: LevelFilter,
+
+    pub jls_pwd: String,
+    pub jls_iv: String,
+    pub jls_upstream: String,
 }
 
 impl Config {

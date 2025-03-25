@@ -1,5 +1,5 @@
 use crate::error::Error;
-use rustls::{Certificate, RootCertStore};
+use rustls_jls::{Certificate, RootCertStore};
 use rustls_pemfile::Item;
 use std::{
     fs::{self, File},

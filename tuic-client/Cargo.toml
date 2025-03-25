@@ -20,9 +20,9 @@ lexopt = { version = "0.3.0", default-features = false }
 log = { version = "0.4.18", default-features = false, features = ["serde", "std"] }
 once_cell = { version = "1.18.0", default-features = false, features = ["parking_lot", "std"] }
 parking_lot = { version = "0.12.1", default-features = false, features = ["send_guard"] }
-quinn = { version = "0.10.1", default-features = false, features = ["futures-io", "runtime-tokio", "tls-rustls"] }
+quinn-jls = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-main", default-features = false, features = ["tls-rustls", "runtime-tokio", "futures-io"]}
 register-count = { version = "0.1.0", default-features = false, features = ["std"] }
-rustls = { version = "0.21.1", default-features = false, features = ["quic"] }
+rustls-jls = { package = "rustls", git = "https://github.com/spongebob888/rustls-jls", branch = "jls-main", features = ["quic"]}
 rustls-native-certs = { version = "0.6.2", default-features = false }
 rustls-pemfile = { version = "1.0.2", default-features = false }
 serde = { version = "1.0.164", default-features = false, features = ["derive", "std"] }

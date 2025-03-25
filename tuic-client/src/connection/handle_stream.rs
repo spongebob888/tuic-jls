@@ -1,7 +1,7 @@
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};
 use bytes::Bytes;
-use quinn::{RecvStream, SendStream, VarInt};
+use quinn_jls::{RecvStream, SendStream, VarInt};
 use register_count::Register;
 use std::sync::atomic::Ordering;
 use tuic_quinn::Task;

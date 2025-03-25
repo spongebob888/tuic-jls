@@ -2,7 +2,7 @@ use self::{authenticated::Authenticated, udp_session::UdpSession};
 use crate::{error::Error, utils::UdpRelayMode};
 use crossbeam_utils::atomic::AtomicCell;
 use parking_lot::Mutex;
-use quinn::{Connecting, Connection as QuinnConnection, VarInt};
+use quinn_jls::{Connecting, Connection as QuinnConnection, VarInt};
 use register_count::Counter;
 use std::{
     collections::HashMap,

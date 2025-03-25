@@ -4,11 +4,11 @@ use crate::{
     error::Error,
     utils::{self, CongestionControl},
 };
-use quinn::{
+use quinn_jls::{
     congestion::{BbrConfig, CubicConfig, NewRenoConfig},
     Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
 };
-use rustls::{version, ServerConfig as RustlsServerConfig};
+use rustls_jls::{version, ServerConfig as RustlsServerConfig};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::{
     collections::HashMap,
@@ -32,9 +32,19 @@ pub struct Server {
 
 impl Server {
     pub fn init(cfg: Config) -> Result<Self, Error> {
-        let certs = utils::load_certs(cfg.certificate)?;
-        let priv_key = utils::load_priv_key(cfg.private_key)?;
-
+        let certs;
+        let priv_key;
+        if cfg.certificate.is_none() || cfg.private_key.is_none() {
+            let rcgen::CertifiedKey { cert, key_pair } =
+                rcgen::generate_simple_self_signed(vec![cfg.jls_upstream.clone().into()]).unwrap();
+            let cert_der = cert.der();
+            priv_key = rustls_jls::PrivateKey(key_pair.serialize_der());
+            certs = vec![rustls_jls::Certificate(cert_der.to_vec())];
+            log::info!("[quic-jls] generate self-signed cert automatically");
+        } else {
+            certs = utils::load_certs(cfg.certificate.unwrap())?;
+            priv_key = utils::load_priv_key(cfg.private_key.unwrap())?;
+        }
         let mut crypto = RustlsServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
@@ -46,6 +56,9 @@ impl Server {
         crypto.alpn_protocols = cfg.alpn;
         crypto.max_early_data_size = u32::MAX;
         crypto.send_half_rtt_data = cfg.zero_rtt_handshake;
+
+        crypto.jls_config = rustls_jls::JlsServerConfig::new(&cfg.jls_pwd, &cfg.jls_iv, &cfg.jls_upstream)
+        .expect("Wrong upstream url format");
 
         let mut config = ServerConfig::with_crypto(Arc::new(crypto));
         let mut tp_cfg = TransportConfig::default();

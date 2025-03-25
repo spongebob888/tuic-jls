@@ -110,6 +110,9 @@ pub struct Relay {
         deserialize_with = "deserialize_duration"
     )]
     pub gc_lifetime: Duration,
+
+    pub jls_pwd: String,   
+    pub jls_iv: String,   
 }
 
 #[derive(Deserialize)]

@@ -1,4 +1,4 @@
-use rustls::{Certificate, PrivateKey};
+use rustls_jls::{Certificate, PrivateKey};
 use rustls_pemfile::Item;
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},

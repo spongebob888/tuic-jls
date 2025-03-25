@@ -1,7 +1,7 @@
 use super::Connection;
 use crate::{error::Error, socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::UdpRelayMode};
 use bytes::Bytes;
-use quinn::ZeroRttAccepted;
+use quinn_jls::ZeroRttAccepted;
 use socks5_proto::Address as Socks5Address;
 use std::time::Duration;
 use tokio::time;
