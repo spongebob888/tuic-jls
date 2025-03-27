@@ -109,7 +109,13 @@ tuic-client -c PATH/TO/CONFIG
 
         // Optional. How long the server should keep a UDP packet fragment. Outdated fragments will be dropped
         // Default: 15s
-        "gc_lifetime": "15s"
+        "gc_lifetime": "15s",
+
+        // JLS password
+        "jls_pwd": "123",
+	    "jls_iv":"123",
+        // SNI
+	    "server_name": "codepen.io"
     },
 
     // Settings for the local inbound socks5 server

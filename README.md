@@ -1,42 +1,98 @@
-# TUIC
+# TUIC-JLS
+TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables：
+- SNI camouflage
+- Anti active detection
+- Free of certificate
+- Anti hijacking (1RTT only)(TO BE DONE)
 
-Delicately-TUICed 0-RTT proxy protocol
+# USAGE
 
-**Warning: TUIC's [dev](https://github.com/EAimTY/tuic/tree/dev) branch is under heavy development. For end-user, please check out the latest released tag**
+## Client
+```json5
+{
+    // Settings for the outbound TUIC proxy
+    "relay": {
+        // TUIC config
+        "server": "example.com:443",
+        "uuid": "00000000-0000-0000-0000-000000000000",
+        "password": "PASSWORD",
+        "ip": "127.0.0.1",
+        "certificates": ["PATH/TO/CERTIFICATE_1", "PATH/TO/CERTIFICATE_2"],
+        "udp_relay_mode": "native",
+        "congestion_control": "cubic",
+        "alpn": ["h3", "spdy/3.1"],
+        "zero_rtt_handshake": false,
+        "disable_sni": false,
+        "timeout": "8s",
+        "heartbeat": "3s",
+        "disable_native_certs": false,
+        "send_window": 16777216,
+        "receive_window": 8388608,
+        "gc_interval": "3s",
+        "gc_lifetime": "15s",
 
-## Introduction
+        // JLS password
+        "jls_pwd": "123",
+	    "jls_iv":"123",
+        // SNI
+	    "server_name": "codepen.io"
+    },
 
-TUIC is a proxy protocol focusing on minimize the additional handshake latency caused by relaying as much as possible, as well as keeping the protocol itself being simple and easy to implement
+    // Settings for the local inbound socks5 server
+    "local": {
+        "server": "[::]:1080",
+        "username": "USERNAME",
+        "password": "PASSWORD",
+        "dual_stack": true,
+        "max_packet_size": 1500
+    },
 
-TUIC is originally designed to be used on top of the [QUIC](https://en.wikipedia.org/wiki/QUIC) protocol, but you can use it with any other protocol, e.g. TCP, in theory
+    "log_level": "warn"
+}
+```
 
-When paired with QUIC, TUIC can achieve:
+## Server
+```json5
+{
+    // TUIC config
+    "server": "[::]:443",
+    "users": {
+        "00000000-0000-0000-0000-000000000000": "PASSWORD_0",
+        "00000000-0000-0000-0000-000000000001": "PASSWORD_1"
+    },
+    "certificate": "PATH/TO/CERTIFICATE",
+    "private_key": "PATH/TO/PRIVATE_KEY",
+    "congestion_control": "cubic",
+    "alpn": ["h3", "spdy/3.1"],
+    "udp_relay_ipv6": true,
+    "zero_rtt_handshake": false,
+    "dual_stack": true,
+    "auth_timeout": "3s",
+    "task_negotiation_timeout": "3s",
+    "max_idle_time": "10s",
+    "max_external_packet_size": 1500,
+    "send_window": 16777216,
+    "receive_window": 8388608,
+    "gc_interval": "3s",
+    "gc_lifetime": "15s",
+    "log_level": "warn",
+    
+    // JLS password
+    "jls_pwd":"123",
+    "jls_iv":"123",
+    // JLS camouflae server
+    "jls_upstream":"codepen.io"
 
-- 0-RTT TCP proxying
-- 0-RTT UDP proxying with NAT type [Full Cone](https://www.rfc-editor.org/rfc/rfc3489#section-5)
-- 0-RTT authentication
-- Two UDP proxying modes:
-    - `native`: Having characteristics of native UDP mechanism
-    - `quic`: Transferring UDP packets losslessly using QUIC streams
-- Fully multiplexed
-- All the advantages of QUIC, including but not limited to:
-    - Bidirectional user-space congestion control
-    - Optional 0-RTT connection handshake
-    - Connection migration
+}
+```
 
-Fully-detailed TUIC protocol specification can be found in [SPEC.md](https://github.com/EAimTY/tuic/blob/dev/SPEC.md)
+# About JLS
+[JLS](https://github.com/JimmyHuang454/JLS) is a simple FakeTLS protocol which encodes identity verfication in the Random field of the ClientHello and ServerHello.
 
-## Overview
+# Potential Risk
+- see [quinn-jls](https://github.com/spongebob888/quinn-jls)
 
-There are 4 crates provided in this repository:
-
-- **[tuic](https://github.com/EAimTY/tuic/tree/dev/tuic)** - Library. The protocol itself, protocol & model abstraction, synchronous / asynchronous marshalling
-- **[tuic-quinn](https://github.com/EAimTY/tuic/tree/dev/tuic-quinn)** - Library. A thin layer on top of [quinn](https://github.com/quinn-rs/quinn) to provide functions of TUIC
-- **[tuic-server](https://github.com/EAimTY/tuic/tree/dev/tuic-server)** - Binary. Minimalistic TUIC server implementation as a reference
-- **[tuic-client](https://github.com/EAimTY/tuic/tree/dev/tuic-client)** - Binary. Minimalistic TUIC client implementation as a reference
-
-## License
-
-Code in this repository is licensed under [GNU General Public License v3.0](https://github.com/EAimTY/tuic/blob/dev/LICENSE)
-
-However, the concept of the TUIC protocol is license-free. You can implement, modify, and redistribute the protocol without any restrictions, even for commercial use
+## See also
+- [JLS](https://github.com/JimmyHuang454/JLS) 
+- [quinn-jls](https://github.com/spongebob888/quinn-jls)
+- [rustls-jls](https://github.com/spongebob888/rustls-jls)

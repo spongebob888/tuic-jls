@@ -105,7 +105,14 @@ tuic-server -c PATH/TO/CONFIG
 
     // Optional. Set the log level
     // Default: "warn"
-    "log_level": "warn"
+    "log_level": "warn",
+    
+    // JLS password
+    "jls_pwd":"123",
+    "jls_iv":"123",
+    // JLS camouflae server
+    "jls_upstream":"codepen.io"
+
 }
 ```
 
