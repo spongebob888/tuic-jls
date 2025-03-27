@@ -111,7 +111,7 @@ tuic-server -c PATH/TO/CONFIG
     "jls_pwd":"123",
     "jls_iv":"123",
     // JLS camouflae server
-    "jls_upstream":"codepen.io"
+    "jls_upstream":"https://codepen.io"
 
 }
 ```

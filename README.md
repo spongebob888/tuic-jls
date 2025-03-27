@@ -60,7 +60,9 @@ TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables
         "00000000-0000-0000-0000-000000000000": "PASSWORD_0",
         "00000000-0000-0000-0000-000000000001": "PASSWORD_1"
     },
+    // Optional. If empty, certificate will be generated automaticly
     "certificate": "PATH/TO/CERTIFICATE",
+    // Optional. If empty, certificate will be generated automaticly
     "private_key": "PATH/TO/PRIVATE_KEY",
     "congestion_control": "cubic",
     "alpn": ["h3", "spdy/3.1"],
@@ -81,7 +83,7 @@ TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables
     "jls_pwd":"123",
     "jls_iv":"123",
     // JLS camouflae server
-    "jls_upstream":"codepen.io"
+    "jls_upstream":"https://codepen.io"
 
 }
 ```
