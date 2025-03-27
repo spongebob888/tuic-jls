@@ -129,9 +129,11 @@ tuic-client -c PATH/TO/CONFIG
         // Default: 15s
         "gc_lifetime": "15s",
 
-        // Optional. Whether the client should ignore correctness of the server certificate.
-        // Default: false
-        "skip_cert_verify": false
+        // JLS password
+        "jls_pwd": "123",
+	    "jls_iv":"123",
+        // SNI
+	    "server_name": "codepen.io"
     },
 
     // Settings for the local inbound socks5 server

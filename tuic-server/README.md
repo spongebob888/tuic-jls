@@ -130,56 +130,17 @@ self_sign = true # Default: false
 # The path to the certificate file
 certificate = "" # Default: ""
 
-# The path to the private key file
-private_key = "" # Default: ""
+    // Optional. Set the log level
+    // Default: "warn"
+    "log_level": "warn",
+    
+    // JLS password
+    "jls_pwd":"123",
+    "jls_iv":"123",
+    // JLS camouflae server
+    "jls_upstream":"codepen.io"
 
-# Application layer protocol negotiation
-alpn = ["h3"] # Default: empty
-
-# See `RESTful API` section below in README.
-# If you want disable RESTful function, remove entire `restful` section.
-[restful] # Default: empty
-addr = "127.0.0.1:8443" # Default: "127.0.0.1:8443"
-# Set secret to "" to disable authorization
-secret = "YOUR_SECRET_HERE" # Default: "YOUR_SECRET_HERE"
-
-# Limit how many clients one uuid can have at the same time.
-# Clients under same IP are considered as DIFFERENT clients
-maximum_clients_per_user = 0
-
-[quic]
-# The initial value to be used as the maximum UDP payload size before running MTU discovery
-# Must be at least 1200
-initial_mtu = 1200
-
-# The maximum UDP payload size guaranteed to be supported by the network.
-# Must be at least 1200
-min_mtu = 1200 # Default: 1200
-
-# Whether to use `Generic Segmentation Offload` to accelerate transmits, when supported by the environment.
-gso = true # Default: true
-
-# Whether to enable Path MTU Discovery to optimize packet size for transmission.
-pmtu = true # Default: true
-
-# Maximum number of bytes to transmit to a peer without acknowledgment
-# Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-send_window = 16777216 # Default: 8MiB * 2
-
-# Maximum number of bytes the peer may transmit without acknowledgement on any one stream before becoming blocked
-# Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-receive_window = 8388608 # Default: 8MiB
-
-# How long the server should wait before closing an idle connection
-max_idle_time = "10s"
-
-
-[quic.congestion_control]
-# Congestion control algorithm, available options: "cubic", "new_reno", "bbr"
-controller = "bbr" # Default: "bbr"
-
-# Sets the initial congestion window size in bytes for the congestion controller algorithm, which may improve burst performance but could lead to congestion under high concurrency.
-initial_window = 1048576 # Default: 1048576
+}
 ```
 ## Notes
 To automatically get TLS cert and key, recommend use [acme.sh](https://github.com/acmesh-official/acme.sh)
