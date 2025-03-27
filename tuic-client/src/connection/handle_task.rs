@@ -14,7 +14,9 @@ impl Connection {
             log::debug!("[relay] [authenticate] waiting for connection to be fully established");
             zero_rtt_accepted.await;
         }
-
+        if self.conn.is_jls() == Some(false) {
+            log::error!("[relay] [jls] connection hijacked or wrong password/iv");
+        }
         log::debug!("[relay] [authenticate] sending authentication");
 
         match self
