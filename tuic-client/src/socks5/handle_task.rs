@@ -161,6 +161,7 @@ impl Server {
     }
 
     pub async fn handle_connect(conn: Connect<connect::NeedReply>, addr: Address) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;    
         let peer_addr = conn.peer_addr().unwrap();
         let target_addr = match addr {
             Address::DomainAddress(domain, port) => TuicAddress::DomainAddress(domain, port),
