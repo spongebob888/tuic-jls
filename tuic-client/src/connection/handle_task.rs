@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
+use log::debug;
 use quinn_jls::ZeroRttAccepted;
 use socks5_proto::Address as Socks5Address;
 use tokio::time;
