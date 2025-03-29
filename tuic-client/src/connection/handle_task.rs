@@ -18,9 +18,9 @@ impl Connection {
                     false => debug!("[relay] [authenticate] zero rtt rejected"),  
                 };
             });
-        }
-        if self.conn.is_jls() == Some(false) {
-            log::error!("[relay] [jls] connection hijacked or wrong password/iv");
+            if self.conn.is_jls() == Some(false) {
+                log::error!("[relay] [jls] connection hijacked or wrong password/iv");
+            }
         }
         log::debug!("[relay] [authenticate] sending authentication");
 
