@@ -1375,7 +1375,7 @@ dependencies = [
 [[package]]
 name = "quinn"
 version = "0.11.7"
-source = "git+https://github.com/spongebob888/quinn-jls?branch=jls-main#b2256edbb51b43e21fdbdf4602bcd9bb3dd5083e"
+source = "git+https://github.com/spongebob888/quinn-jls?branch=jls-dev#17ecd1c666972a2ff787081fa6ae8ef3ab282df3"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -1384,7 +1384,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash 2.1.1",
- "rustls 0.23.25 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustls",
  "socket2",
  "thiserror",
  "tokio",
@@ -1395,7 +1395,7 @@ dependencies = [
 [[package]]
 name = "quinn-proto"
 version = "0.11.10"
-source = "git+https://github.com/spongebob888/quinn-jls?branch=jls-main#b2256edbb51b43e21fdbdf4602bcd9bb3dd5083e"
+source = "git+https://github.com/spongebob888/quinn-jls?branch=jls-dev#17ecd1c666972a2ff787081fa6ae8ef3ab282df3"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -1403,7 +1403,7 @@ dependencies = [
  "rand",
  "ring",
  "rustc-hash 2.1.1",
- "rustls 0.23.25 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustls",
  "rustls-pki-types",
  "slab",
  "thiserror",
@@ -1415,7 +1415,7 @@ dependencies = [
 [[package]]
 name = "quinn-udp"
 version = "0.5.10"
-source = "git+https://github.com/spongebob888/quinn-jls?branch=jls-main#b2256edbb51b43e21fdbdf4602bcd9bb3dd5083e"
+source = "git+https://github.com/spongebob888/quinn-jls?branch=jls-dev#17ecd1c666972a2ff787081fa6ae8ef3ab282df3"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1584,22 +1584,7 @@ dependencies = [
 [[package]]
 name = "rustls"
 version = "0.23.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "822ee9188ac4ec04a2f0531e55d035fb2de73f18b41a63c70c2712503b6fb13c"
-dependencies = [
- "aws-lc-rs",
- "once_cell",
- "ring",
- "rustls-pki-types",
- "rustls-webpki",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "rustls"
-version = "0.23.25"
-source = "git+https://github.com/spongebob888/rustls-jls?branch=jls-main#06724350b3bb7bb42baa12cc73e0116a6f1499d9"
+source = "git+https://github.com/spongebob888/rustls-jls?branch=jls-dev#06724350b3bb7bb42baa12cc73e0116a6f1499d9"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
@@ -2175,7 +2160,7 @@ dependencies = [
  "once_cell",
  "quinn",
  "register-count",
- "rustls 0.23.25 (git+https://github.com/spongebob888/rustls-jls?branch=jls-main)",
+ "rustls",
  "rustls-native-certs",
  "rustls-pemfile",
  "serde",
@@ -2230,7 +2215,7 @@ dependencies = [
  "quinn",
  "rcgen",
  "register-count",
- "rustls 0.23.25 (git+https://github.com/spongebob888/rustls-jls?branch=jls-main)",
+ "rustls",
  "rustls-pemfile",
  "serde",
  "serde_json",

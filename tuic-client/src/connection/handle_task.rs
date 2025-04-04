@@ -1,11 +1,10 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use log::debug;
-use quinn_jls::ZeroRttAccepted;
+use quinn::ZeroRttAccepted;
 use socks5_proto::Address as Socks5Address;
 use tokio::time;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 use tuic::Address;
 use tuic_quinn::{Connect, Packet};
 
@@ -23,10 +22,10 @@ impl Connection {
                 };
             });
             if self.conn.is_jls() == Some(false) {
-                log::error!("[relay] [jls] connection hijacked or wrong password/iv");
+                error!("[relay] [jls] connection hijacked or wrong password/iv");
             }
         }
-        log::debug!("[relay] [authenticate] sending authentication");
+        debug!("[relay] [authenticate] sending authentication");
 
         match self
             .model

@@ -32,7 +32,7 @@ socks5-server = { version = "0.8", default-features = false }
 uuid = { version = "1", default-features = false, features = ["serde", "std"] }
 
 # QUIC
-quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-main", default-features = false}
+quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-dev", default-features = false}
 
 # TUIC
 tuic = { path = "../tuic", default-features = false }
@@ -45,7 +45,7 @@ tokio = { version = "1", default-features = false, features = ["io-util", "macro
 tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
 
 # TLS
-rustls = { package = "rustls", git = "https://github.com/spongebob888/rustls-jls", branch = "jls-main", default-features = false, features = ["std"]}
+rustls = { package = "rustls", git = "https://github.com/spongebob888/rustls-jls", branch = "jls-dev", default-features = false, features = ["std"]}
 rustls-native-certs = { version = "0.8", default-features = false }
 rustls-pemfile = { version = "2", default-features = false, features = ["std"] }
 

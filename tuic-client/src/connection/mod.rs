@@ -133,13 +133,11 @@ impl Connection {
         crypto.alpn_protocols = cfg.alpn;
         crypto.enable_early_data = true;
         crypto.enable_sni = !cfg.disable_sni;
-
+        crypto.jls_config = rustls::JlsConfig::new(&cfg.jls_pwd,&cfg.jls_iv);
+  
         let mut config = ClientConfig::new(Arc::new(
             QuicClientConfig::try_from(crypto).context("no initial cipher suite found")?,
         ));
-        crypto.jls_config = rustls_jls::JlsConfig::new(&cfg.jls_pwd,&cfg.jls_iv);
-  
-        let mut config = ClientConfig::new(Arc::new(crypto));
         let mut tp_cfg = TransportConfig::default();
 
         tp_cfg

@@ -1,7 +1,7 @@
 use std::io::Error as IoError;
 
-use quinn_jls::{ConnectError, ConnectionError};
-use rustls_jls::Error as RustlsError;
+use quinn::{ConnectError, ConnectionError};
+use rustls::Error as RustlsError;
 use thiserror::Error;
 use tuic_quinn::Error as ModelError;
 
