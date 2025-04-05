@@ -11,14 +11,14 @@
 
         libraries = with pkgs;[
           glib
-          openssl_3
+          openssl_3.dev
           sqlite
           libclang
         ];
 
         packages = with pkgs; [
           curlHTTP3
-          python
+          python3
           wget
           sqlite
           pkg-config

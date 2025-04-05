@@ -1,0 +1,60 @@
+
+{
+    "relay": {
+
+        "server": "127.0.0.1:4443",
+
+
+        "uuid": "00000000-0000-0000-0000-000000000000",
+
+        "password": "ffffffff",
+
+        "udp_relay_mode": "native",
+
+  
+        "congestion_control": "bbr",
+
+
+        "alpn": ["h3", "spdy/3.1"],
+
+
+        "zero_rtt_handshake": true,
+
+
+        "disable_sni": false,
+
+
+        "timeout": "60s",
+
+ 
+        "heartbeat": "3s",
+
+        "disable_native_certs": false,
+
+        "send_window": 16777216,
+
+
+        "receive_window": 8388608,
+
+
+        "gc_interval": "3s",
+
+        "gc_lifetime": "15s",
+	"jls_pwd": "123",
+	"jls_iv":"123",
+	"server_name": "echo.free.beeceptor.com"
+    },
+
+    "local": {
+
+        "server": "[::]:1089",
+
+
+        "dual_stack": true,
+
+        "max_packet_size": 1500
+    },
+
+
+    "log_level": "debug"
+}

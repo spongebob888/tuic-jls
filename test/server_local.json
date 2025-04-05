@@ -1,0 +1,44 @@
+{
+
+    "server": "[::]:4443",
+
+
+    "users": {
+        "00000000-0000-0000-0000-000000000000": "ffffffff"
+    },
+
+    "congestion_control": "bbr",
+
+    "alpn": ["h3", "spdy/3.1"],
+
+    "udp_relay_ipv6": true,
+
+    "self_sign": true,
+    "zero_rtt_handshake": true,
+
+    "dual_stack": true,
+
+ 
+    "auth_timeout": "3s",
+
+
+    "task_negotiation_timeout": "3s",
+
+
+    "max_external_packet_size": 1500,
+
+    "send_window": 16777216,
+
+    "receive_window": 8388608,
+
+    "gc_interval": "3s",
+
+    "gc_lifetime": "15s",
+
+    "log_level": "warn",
+    "jls_pwd":"123",
+    "jls_iv":"123",
+    "jls_upstream":"echo.free.beeceptor.com:443"
+     
+}
+
