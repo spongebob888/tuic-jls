@@ -15,26 +15,28 @@ impl Connection {
     pub async fn authenticate(self, zero_rtt_accepted: Option<ZeroRttAccepted>) {
         if let Some(zero_rtt_accepted) = zero_rtt_accepted {
             debug!("[relay] [authenticate] waiting for connection to be fully established");
-            tokio::spawn( async {
+            let conn_ref = self.conn.clone();
+            tokio::spawn( async move {
                 match zero_rtt_accepted.await {
                     true => debug!("[relay] [authenticate] zero rtt acepted"),
                     false => debug!("[relay] [authenticate] zero rtt rejected"),  
                 };
+                if conn_ref.is_jls() == Some(false) {
+                    error!("[relay] [jls] connection hijacked or wrong password/iv");
+                }
             });
-            if self.conn.is_jls() == Some(false) {
-                error!("[relay] [jls] connection hijacked or wrong password/iv");
-            }
-        }
-        debug!("[relay] [authenticate] sending authentication");
 
-        match self
-            .model
-            .authenticate(self.uuid, self.password.clone())
-            .await
-        {
-            Ok(()) => info!("[relay] [authenticate] {uuid}", uuid = self.uuid),
-            Err(err) => warn!("[relay] [authenticate] authentication sending error: {err}"),
         }
+        debug!("[relay] [authenticate] skip authentication for jls");
+
+        // match self
+        //     .model
+        //     .authenticate(self.uuid, self.password.clone())
+        //     .await
+        // {
+        //     Ok(()) => info!("[relay] [authenticate] {uuid}", uuid = self.uuid),
+        //     Err(err) => warn!("[relay] [authenticate] authentication sending error: {err}"),
+        // }
     }
 
     pub async fn connect(&self, addr: Address) -> Result<Connect, Error> {

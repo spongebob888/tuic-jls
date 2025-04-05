@@ -32,7 +32,7 @@ socks5-server = { version = "0.8", default-features = false }
 uuid = { version = "1", default-features = false, features = ["serde", "std"] }
 
 # QUIC
-quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-dev", default-features = false}
+quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-dev", default-features = false, features = ["runtime-tokio"]}
 
 # TUIC
 tuic = { path = "../tuic", default-features = false }
