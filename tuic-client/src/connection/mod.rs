@@ -46,7 +46,9 @@ const DEFAULT_CONCURRENT_STREAMS: u32 = 32;
 pub struct Connection {
     conn: QuinnConnection,
     model: Model<side::Client>,
+    #[allow(dead_code)]
     uuid: Uuid,
+    #[allow(dead_code)]
     password: Arc<[u8]>,
     udp_relay_mode: UdpRelayMode,
     remote_uni_stream_cnt: Counter,
