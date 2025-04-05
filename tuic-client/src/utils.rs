@@ -1,4 +1,3 @@
-use rustls_pemfile::Item;
 use std::{
     fs,
     net::{IpAddr, SocketAddr},
@@ -8,6 +7,7 @@ use std::{
 
 use anyhow::Context;
 use rustls::{RootCertStore, pki_types::CertificateDer};
+use rustls_pemfile::Item;
 use tokio::net;
 
 use crate::error::Error;

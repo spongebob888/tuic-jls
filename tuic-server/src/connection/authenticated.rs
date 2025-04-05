@@ -20,9 +20,10 @@ struct AuthenticatedInner {
 // The whole thing below is just an observable boolean
 impl Authenticated {
     pub fn new() -> Self {
-
         Self(Arc::new(AuthenticatedInner {
-            uuid: ArcSwap::new(Arc::new(Some(Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap()))),
+            uuid: ArcSwap::new(Arc::new(Some(
+                Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap(),
+            ))),
             tx: AsyncRwLock::new(None),
         }))
     }

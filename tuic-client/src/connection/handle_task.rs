@@ -4,7 +4,7 @@ use bytes::Bytes;
 use quinn::ZeroRttAccepted;
 use socks5_proto::Address as Socks5Address;
 use tokio::time;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 use tuic::Address;
 use tuic_quinn::{Connect, Packet};
 
@@ -16,16 +16,15 @@ impl Connection {
         if let Some(zero_rtt_accepted) = zero_rtt_accepted {
             debug!("[relay] [authenticate] waiting for connection to be fully established");
             let conn_ref = self.conn.clone();
-            tokio::spawn( async move {
+            tokio::spawn(async move {
                 match zero_rtt_accepted.await {
                     true => debug!("[relay] [authenticate] zero rtt acepted"),
-                    false => debug!("[relay] [authenticate] zero rtt rejected"),  
+                    false => debug!("[relay] [authenticate] zero rtt rejected"),
                 };
                 if conn_ref.is_jls() == Some(false) {
                     error!("[relay] [jls] connection hijacked or wrong password/iv");
                 }
             });
-
         }
         debug!("[relay] [authenticate] skip authentication for jls");
 
@@ -34,9 +33,9 @@ impl Connection {
         //     .authenticate(self.uuid, self.password.clone())
         //     .await
         // {
-        //     Ok(()) => info!("[relay] [authenticate] {uuid}", uuid = self.uuid),
-        //     Err(err) => warn!("[relay] [authenticate] authentication sending error: {err}"),
-        // }
+        //     Ok(()) => info!("[relay] [authenticate] {uuid}", uuid =
+        // self.uuid),     Err(err) => warn!("[relay] [authenticate]
+        // authentication sending error: {err}"), }
     }
 
     pub async fn connect(&self, addr: Address) -> Result<Connect, Error> {

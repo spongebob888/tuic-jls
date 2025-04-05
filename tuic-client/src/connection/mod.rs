@@ -133,8 +133,8 @@ impl Connection {
         crypto.alpn_protocols = cfg.alpn;
         crypto.enable_early_data = true;
         crypto.enable_sni = !cfg.disable_sni;
-        crypto.jls_config = rustls::JlsConfig::new(&cfg.jls_pwd,&cfg.jls_iv);
-  
+        crypto.jls_config = rustls::JlsConfig::new(&cfg.jls_pwd, &cfg.jls_iv);
+
         let mut config = ClientConfig::new(Arc::new(
             QuicClientConfig::try_from(crypto).context("no initial cipher suite found")?,
         ));
@@ -350,8 +350,12 @@ impl Endpoint {
 
         for addr in self.server.resolve().await? {
             let connect_to = async {
-                let conn = self.ep.connect(addr, 
-                    self.server_name.as_deref().unwrap_or(self.server.server_name()))?;
+                let conn = self.ep.connect(
+                    addr,
+                    self.server_name
+                        .as_deref()
+                        .unwrap_or(self.server.server_name()),
+                )?;
                 let (conn, zero_rtt_accepted) = if self.zero_rtt_handshake {
                     match conn.into_0rtt() {
                         Ok((conn, zero_rtt_accepted)) => (conn, Some(zero_rtt_accepted)),

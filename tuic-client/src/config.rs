@@ -126,8 +126,8 @@ pub struct Relay {
 
     #[serde(default = "default::relay::skip_cert_verify")]
     pub skip_cert_verify: bool,
-    pub jls_pwd: String,   
-    pub jls_iv: String,   
+    pub jls_pwd: String,
+    pub jls_iv: String,
     pub server_name: Option<String>,
 }
 
