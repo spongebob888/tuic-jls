@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use quinn::ZeroRttAccepted;
+use quinn::{VarInt, ZeroRttAccepted};
 use socks5_proto::Address as Socks5Address;
 use tokio::time;
 use tracing::{debug, error, info, warn};
@@ -13,9 +13,9 @@ use crate::{error::Error, socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::Ud
 
 impl Connection {
     pub async fn authenticate(self, zero_rtt_accepted: Option<ZeroRttAccepted>) {
+        let conn_ref = self.conn.clone();
         if let Some(zero_rtt_accepted) = zero_rtt_accepted {
             debug!("[relay] [authenticate] waiting for connection to be fully established");
-            let conn_ref = self.conn.clone();
             tokio::spawn(async move {
                 match zero_rtt_accepted.await {
                     true => debug!("[relay] [authenticate] zero rtt acepted"),
@@ -23,27 +23,38 @@ impl Connection {
                 };
                 if conn_ref.is_jls() == Some(false) {
                     error!("[relay] [jls] connection hijacked or wrong password/iv");
+                    conn_ref.close(VarInt::from_u32(0), b"No Reason");
                 }
             });
+        } else if conn_ref.is_jls() == Some(false) {
+            error!("[relay] [jls] connection hijacked or wrong password/iv");
+            conn_ref.close(VarInt::from_u32(0), b"No Reason");
         }
-        debug!("[relay] [authenticate] skip authentication for jls");
 
-        // match self
-        //     .model
-        //     .authenticate(self.uuid, self.password.clone())
-        //     .await
-        // {
-        //     Ok(()) => info!("[relay] [authenticate] {uuid}", uuid =
-        // self.uuid),     Err(err) => warn!("[relay] [authenticate]
-        // authentication sending error: {err}"), }
+        debug!("[relay] [authenticate] skip authentication for jls");
     }
 
     pub async fn connect(&self, addr: Address) -> Result<Connect, Error> {
         let addr_display = addr.to_string();
         info!("[relay] [connect] {addr_display}");
 
+        let rate: f32 = (self.conn.stats().path.lost_packets as f32)
+            / ((self.conn.stats().path.sent_packets + 1) as f32);
+        debug!(
+            "[relay] [connect] packet_loss_rate:{:.2}%, rtt:{:?}, mtu:{}",
+            rate * 100.0,
+            self.conn.rtt(),
+            self.conn.stats().path.current_mtu,
+        );
         match self.model.connect(addr).await {
-            Ok(conn) => Ok(conn),
+            Ok(conn) => {
+                if self.conn.is_jls() == Some(false) {
+                    error!("[relay] [jls] connection hijacked or wrong password/iv");
+                    self.conn.close(VarInt::from_u32(0), b"No Reason");
+                    return Err(anyhow::anyhow!("JLS Hijacked or wrong password/iv").into());
+                }
+                Ok(conn)
+            }
             Err(err) => {
                 warn!("[relay] [connect] failed initializing relay to {addr_display}: {err}");
                 Err(Error::Model(err))
@@ -53,6 +64,12 @@ impl Connection {
 
     pub async fn packet(&self, pkt: Bytes, addr: Address, assoc_id: u16) -> eyre::Result<()> {
         let addr_display = addr.to_string();
+
+        if self.conn.is_jls() == Some(false) {
+            error!("[relay] [jls] connection hijacked or wrong password/iv");
+            self.conn.close(VarInt::from_u32(0), b"No Reason");
+            return Err(eyre::eyre!("JLS Hijacked or wrong password/iv"));
+        }
 
         match self.udp_relay_mode {
             UdpRelayMode::Native => {
