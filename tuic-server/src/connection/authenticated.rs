@@ -1,53 +1,61 @@
-use crossbeam_utils::atomic::AtomicCell;
-use parking_lot::Mutex;
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
-    future::Future,
-    pin::Pin,
+    ops::Deref,
     sync::Arc,
-    task::{Context, Poll, Waker},
 };
+
+use arc_swap::ArcSwap;
+use tokio::sync::{RwLock as AsyncRwLock, broadcast::Sender};
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct Authenticated(Arc<AuthenticatedInner>);
 
 struct AuthenticatedInner {
-    uuid: AtomicCell<Option<Uuid>>,
-    broadcast: Mutex<Vec<Waker>>,
+    /// uuid that waiting for auth
+    uuid: ArcSwap<Option<Uuid>>,
+    tx: AsyncRwLock<Option<Sender<()>>>,
 }
 
+// The whole thing below is just an observable boolean
 impl Authenticated {
     pub fn new() -> Self {
         Self(Arc::new(AuthenticatedInner {
-            uuid: AtomicCell::new(None),
-            broadcast: Mutex::new(Vec::new()),
+            uuid: ArcSwap::new(Arc::new(Some(
+                Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap(),
+            ))),
+            tx: AsyncRwLock::new(None),
         }))
     }
 
-    pub fn set(&self, uuid: Uuid) {
-        self.0.uuid.store(Some(uuid));
-
-        for waker in self.0.broadcast.lock().drain(..) {
-            waker.wake();
+    /// invoking 'set' means auth success
+    pub async fn set(&self, uuid: Uuid) {
+        self.0.uuid.store(Some(uuid).into());
+        if let Some(tx) = self.0.tx.read().await.deref() {
+            // It will fail if there is no active receiver
+            _ = tx.send(());
+        } else {
+            // TODO LOGGIING multi auth packet
         }
+        // Drop broadcast sender
+        self.0.tx.write().await.take();
     }
 
     pub fn get(&self) -> Option<Uuid> {
-        self.0.uuid.load()
+        **self.0.uuid.load()
     }
-}
 
-impl Future for Authenticated {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.get().is_some() {
-            Poll::Ready(())
-        } else {
-            self.0.broadcast.lock().push(cx.waker().clone());
-            Poll::Pending
+    /// waiting for auth success
+    pub async fn wait(&self) {
+        let guard = self.0.tx.read().await;
+        if let Some(tx) = guard.deref() {
+            let mut rx = tx.subscribe();
+            drop(guard);
+            // It will fail when 1. sender been dropped 2. channel buffer overflow(multi
+            // auth packet)
+            _ = rx.recv().await;
         }
+        // If the `tx` already `None`, that's meaning `set` had been invoked
     }
 }
 

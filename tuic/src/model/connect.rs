@@ -1,7 +1,9 @@
+use std::fmt::{Debug, Formatter, Result as FmtResult};
+
+use register_count::Register;
+
 use super::side::{self, Side};
 use crate::{Address, Connect as ConnectHeader, Header};
-use register_count::Register;
-use std::fmt::{Debug, Formatter, Result as FmtResult};
 
 /// The model of the `Connect` command
 pub struct Connect<M> {
@@ -27,14 +29,18 @@ impl Connect<side::Tx> {
 
     /// Returns the header of the `Connect` command
     pub fn header(&self) -> &Header {
-        let Side::Tx(tx) = &self.inner else { unreachable!() };
+        let Side::Tx(tx) = &self.inner else {
+            unreachable!()
+        };
         &tx.header
     }
 }
 
 impl Debug for Connect<side::Tx> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        let Side::Tx(tx) = &self.inner else { unreachable!() };
+        let Side::Tx(tx) = &self.inner else {
+            unreachable!()
+        };
         f.debug_struct("Connect")
             .field("header", &tx.header)
             .finish()
@@ -59,14 +65,18 @@ impl Connect<side::Rx> {
 
     /// Returns the address
     pub fn addr(&self) -> &Address {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         &rx.addr
     }
 }
 
 impl Debug for Connect<side::Rx> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        let Side::Rx(rx) = &self.inner else { unreachable!() };
+        let Side::Rx(rx) = &self.inner else {
+            unreachable!()
+        };
         f.debug_struct("Connect").field("addr", &rx.addr).finish()
     }
 }

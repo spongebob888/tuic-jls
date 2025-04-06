@@ -1,35 +1,70 @@
 [package]
 name = "tuic-server"
-version = "1.0.0"
-authors = ["EAimTY <ea.imty@gmail.com>"]
+version.workspace = true
+authors.workspace = true
 description = "Minimalistic TUIC server implementation as a reference"
 categories = ["network-programming"]
 keywords = ["network", "proxy", "quic", "tuic"]
-edition = "2021"
-rust-version = "1.65.0"
-readme = "README.md"
-license = "GPL-3.0-or-later"
-repository = "https://github.com/EAimTY/tuic"
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["aws-lc-rs"]
+ring = ["rustls/ring", "rcgen/ring", "quinn/rustls-ring"]
+aws-lc-rs = ["rustls/aws-lc-rs", "rcgen/aws_lc_rs", "quinn/rustls-aws-lc-rs"]
+jemallocator = ["tikv-jemallocator"]
 
 [dependencies]
-bytes = { version = "1.4.0", default-features = false, features = ["std"] }
-crossbeam-utils = { version = "0.8.15", default-features = false, features = ["std"] }
-env_logger = { version = "0.10.0", default-features = false, features = ["humantime"] }
-humantime = { version = "2.1.0", default-features = false }
-lexopt = { version = "0.3.0", default-features = false }
-log = { version = "0.4.18", default-features = false, features = ["serde", "std"] }
-parking_lot = { version = "0.12.1", default-features = false }
-quinn-jls = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-main", default-features = false, features = ["tls-rustls", "runtime-tokio", "futures-io"]}
-rcgen = "0.13.2"
-register-count = { version = "0.1.0", default-features = false, features = ["std"] }
-rustls-jls = { package = "rustls", git = "https://github.com/spongebob888/rustls-jls", branch = "jls-main",features = ["quic"]}
-rustls-pemfile = { version = "1.0.2", default-features = false }
-serde = { version = "1.0.164", default-features = false, features = ["derive", "std"] }
-serde_json = { version = "1.0.96", default-features = false, features = ["std"] }
-socket2 = { version = "0.5.3", default-features = false }
-thiserror = { version = "1.0.40", default-features = false }
-tokio = { version = "1.28.2", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time"] }
-tokio-util = { version = "0.7.8", default-features = false, features = ["compat"] }
+
+lateinit = "0.2"
+toml = "0.8"
+lexopt = { version = "0.3", default-features = false }
+socket2 = { version = "0.5", default-features = false }
+arc-swap = "1"
+uuid = { version = "1", default-features = false, features = ["serde", "std", "v4"] }
+chashmap = { package = "chashmap-async", version = "0.1" }
+notify = "7"
+
+# QUIC
+quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-dev", default-features = false, features = ["log", "runtime-tokio"]}
+
+# TUIC
 tuic = { path = "../tuic", default-features = false }
 tuic-quinn = { path = "../tuic-quinn", default-features = false }
-uuid = { version = "1.3.3", default-features = false, features = ["serde", "std"] }
+register-count = { version = "0.1.0", default-features = false, features = ["std"] }
+
+# Tokio/Async
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "parking_lot", "rt-multi-thread", "time", "fs", "signal"] }
+
+# TLS
+rustls = { package = "rustls", git = "https://github.com/spongebob888/rustls-jls", branch = "jls-dev", default-features = false, features = ["std"]}
+rustls-pemfile = { version = "2", default-features = false, features = ["std"]}
+rcgen = { version = "0.13", default-features = false, features = ["crypto"] }
+
+# Serde
+bytes = { version = "1", default-features = false, features = ["std"] }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+figment = { version = "0.10", features = ["toml"] }
+educe = { version = "0.6", default-features = false, features = ["Default"] }
+humantime-serde = "1"
+
+# Logging
+time = { version = "0.3", features = ["macros", "local-offset"] }
+humantime = { version = "2", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["tracing-log", "std", "local-time","fmt", "ansi"] }
+chrono = "0.4"
+tracing = "0.1"
+
+# Error handling
+thiserror = { version = "2", default-features = false }
+eyre = { version = "0.6" }
+
+# Web
+axum = { version = "0.8", features = ["json", "tokio"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+
+tikv-jemallocator = { version = "0.6", optional = true }

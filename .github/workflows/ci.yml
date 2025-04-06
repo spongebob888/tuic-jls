@@ -1,0 +1,354 @@
+name: CI
+
+on:
+  push:
+    tags: [ "v*" ]
+    branches: [ "dev" ]
+  pull_request:
+    branches: [ "dev" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE: "tuic-server"
+  PACKAGE2: "tuic-client"
+  RUST_TOOLCHAIN: "nightly-2024-12-29"
+
+jobs:
+  compile:
+    name: ${{ matrix.release-name || matrix.target || 'Unknown' }}
+    permissions:
+      contents: write
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Example
+          # when not set, default will be used (except target, cross)
+          # - os: ubuntu-latest
+          #   target: x86_64-unknown-linux-gnu
+          #   release-name: x86_64-linux
+          #   toolchain: stable
+          #   cross: true
+          #   postfix: ""
+          #   extra-args: ""
+          #   components: ""
+          #   rustflags: ""
+
+          # Linux x86
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            release-name: x86_64-linux
+            cross: true
+            extra-args: "--features jemallocator"
+          - os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            release-name: i686-linux
+            cross: true
+            extra-args: "--features jemallocator"
+          # Linux x86 musl
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            release-name: x86_64-linux-musl
+            cross: true
+            extra-args: "--features jemallocator"
+          - os: ubuntu-latest
+            target: i686-unknown-linux-musl
+            release-name: i686-linux-musl
+            cross: true
+            extra-args: "--no-default-features --features ring"
+          # Linux arm
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            release-name: aarch64-linux
+            cross: true
+            extra-args: "--features jemallocator"
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabi
+            release-name: armv7-linux
+            cross: true
+            extra-args: "--no-default-features --features ring,jemallocator"
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            release-name: armv7-linux-hf
+            cross: true
+            extra-args: "--no-default-features --features ring,jemallocator"
+          # Linux arm musl
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            release-name: aarch64-linux-musl
+            cross: true
+            extra-args: "--features jemallocator"
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-musleabi
+            release-name: armv7-linux-musl
+            cross: true
+            extra-args: "--no-default-features --features ring"
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-musleabihf
+            release-name: armv7-linux-muslhf
+            cross: true
+            extra-args: "--no-default-features --features ring"
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            release-name: x86_64-windows
+            cross: false
+            postfix: ".exe"
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            release-name: i686-windows
+            cross: false
+            postfix: ".exe"
+            extra-args: "--no-default-features --features ring"
+          # Windows Arm
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            release-name: aarch64-windows
+            cross: false
+            postfix: ".exe"
+            skip-test: true
+          # MacOSX
+          - os: macos-13
+            target: x86_64-apple-darwin
+            release-name: x86_64-darwin
+            cross: false
+            extra-args: "--features jemallocator"
+            
+          - os: macos-14
+            target: aarch64-apple-darwin
+            release-name: aarch64-darwin
+            cross: false
+            extra-args: "--features jemallocator"
+
+          # FreeBSD
+          # - os: ubuntu-latest
+          #   target: x86_64-unknown-freebsd
+          #   release-name: x86_64-freebsd
+          #   cross: true
+          #   rustflags: "-Ctarget-feature=+sse2,+sse3,+avx"
+
+          # RISC-V
+          - os: ubuntu-latest
+            target: riscv64gc-unknown-linux-gnu
+            release-name: riscv64gc-linux
+            cross: true
+            extra-args: "--no-default-features --features ring,jemallocator"
+
+          # Loongarch64 ring problem
+          # - os: ubuntu-latest
+          #   target: loongarch64-unknown-linux-gnu
+          #   release-name: loongarch64-linux
+          #   cross: true
+
+          # Linux mips: tier-3, pity
+          # Windows gnu: tokio dont work
+          # Windows aarch: todo
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ matrix.release-name || matrix.target }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ matrix.release-name || matrix.target }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain || env.RUST_TOOLCHAIN }}
+          target: ${{ matrix.target }}
+          components: ${{ matrix.components || 'rustfmt, clippy' }}
+
+      - name: Cargo fmt
+        uses: clechasseur/rs-cargo@v2
+        with:
+          use-cross: ${{ matrix.cross }}
+          command: fmt
+          args: --all -- --check
+
+      - name: Cargo clippy
+        uses: clechasseur/rs-cargo@v2
+        with:
+          use-cross: ${{ matrix.cross }}
+          command: clippy
+          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }} -- -D warnings
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+
+      - name: Cargo test
+        uses: clechasseur/rs-cargo@v2
+        if: ${{ !matrix.skip-test }}
+        with:
+          use-cross: ${{ matrix.cross }}
+          command: test
+          args: --all --target ${{ matrix.target }} ${{ matrix.extra-args }}
+        env:
+          CROSS_CONTAINER_OPTS: "--network host"
+          RUSTFLAGS: ${{ matrix.rustflags }}
+
+      - name: Cargo build
+        uses: clechasseur/rs-cargo@v2
+        with:
+          use-cross: ${{ matrix.cross }}
+          command: build
+          args: --workspace --release --target ${{ matrix.target }} ${{ matrix.extra-args }}
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+
+      - name: Rename binary
+        run: mv target/${{ matrix.target }}/release/${{ env.PACKAGE }}${{ matrix.postfix }} ${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}
+          path: ${{ env.PACKAGE }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
+
+      - name: Rename binary
+        run: mv target/${{ matrix.target }}/release/${{ env.PACKAGE2 }}${{ matrix.postfix }} ${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}
+          path: ${{ env.PACKAGE2 }}-${{ matrix.release-name || matrix.target }}${{ matrix.postfix }}
+
+
+  release:
+    name: Release
+    needs: [compile]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Merge binaries
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: binaries
+          pattern: '*'
+          retention-days: 1
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: ./packages
+
+      - name: Clean git tag & release
+        if: startsWith(github.ref, 'refs/heads/dev')
+        run: |
+          gh release delete latest --cleanup-tag --yes --repo $GITHUB_REPOSITORY || true
+          # Deleted latest tag and push it
+          git tag -d latest || true
+          # Create local tag
+          git tag latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # Delete latest tag locally (for git-cliff)
+          git tag -d latest || true
+
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@main
+        id: git-cliff
+        with:
+          config: .github/cliff.toml
+          args: --latest --strip header
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Github stable release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prerelease: false
+          generate_release_notes: false
+          body: ${{ steps.git-cliff.outputs.content }}
+          files: |
+            packages/*
+            LICENSE
+
+      - name: Github nightly release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/heads/dev')
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          prerelease: true
+          generate_release_notes: false
+          body: ${{ steps.git-cliff.outputs.content }}
+          tag_name: "latest"
+          files: |
+            packages/*
+            LICENSE
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    needs: [compile]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Download binaries amd64
+        uses: actions/download-artifact@v4
+        with:
+          name: tuic-server-x86_64-linux-musl
+          path: ./packages
+
+      - name: Download binaries arm64
+        uses: actions/download-artifact@v4
+        with:
+          name: tuic-server-aarch64-linux-musl
+          path: ./packages
+
+      - name: Rename binary
+        run: |
+          mv ./packages/tuic-server-x86_64-linux-musl ./packages/tuic-server-amd64
+          mv ./packages/tuic-server-aarch64-linux-musl ./packages/tuic-server-arm64
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set version tag
+        run: |
+          if [[ $GITHUB_REF == refs/heads/dev ]] || [[ $GITHUB_REF == refs/pull/*/merge ]]; then
+            echo "TAG_VERSION=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:0.0.0" >> $GITHUB_ENV
+          else
+            echo "TAG_VERSION=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+          fi
+          echo "TAG_LATEST=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/tuic-server:latest" >> $GITHUB_ENV
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ env.TAG_VERSION }},${{ env.TAG_LATEST }}
+          provenance: false

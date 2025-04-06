@@ -13,12 +13,12 @@ This implementation only contains the most basic requirements of a functional TU
 
 ## Usage
 
-Download the latest binary from [releases](https://github.com/EAimTY/tuic/releases).
+Download the latest binary from [releases](https://github.com/Itsusinn/tuic/releases).
 
 Or install from [crates.io](https://crates.io/crates/tuic-server):
 
 ```bash
-cargo install tuic-server
+cargo install --git https://github.com/Itsusinn/tuic.git tuic-server
 ```
 
 Run the TUIC server with configuration file:
@@ -27,81 +27,108 @@ Run the TUIC server with configuration file:
 tuic-server -c PATH/TO/CONFIG
 ```
 
+Or with Docker
+
+```bash
+docker run --name tuic-server \
+  --restart always \
+  --network host \
+  -v /PATH/TO/CONFIG:/etc/tuic/config.json \
+  -v /PATH/TO/CERTIFICATE:PATH/TO/CERTIFICATE \
+  -v /PATH/TO/PRIVATE_KEY:PATH/TO/PRIVATE_KEY \
+  -dit ghcr.io/itsusinn/tuic-server:latest
+```
+
+Or with Docker Compose
+
+```yaml
+services:
+  tuic:
+    image: ghcr.io/itsusinn/tuic-server:latest
+    restart: always
+    container_name: tuic
+    network_mode: host
+    volumes:
+      - ./config.json:/etc/tuic/config.json:ro
+      - ./cert.crt:/PATH/TO/CERT:ro
+      - ./key.crt:/PATH/TO/KEY:ro
+```
+
+If you use TOML format configuration
+
+
+```yaml
+services:
+  tuic:
+    image: ghcr.io/itsusinn/tuic-server:latest
+    restart: always
+    container_name: tuic
+    network_mode: host
+    volumes:
+      - ./config.toml:/etc/tuic/config.json:ro # Must be /path/to/toml:/etc/tuic/*config.json*:ro, this will be fix in 2.0.0.
+      - ./cert.crt:/PATH/TO/CERT:ro
+      - ./key.crt:/PATH/TO/KEY:ro
+    environment:
+      - TUIC_FORCE_TOML=1
+```
+
 ## Configuration
 
-```json5
-{
-    // The socket address to listen on
-    "server": "[::]:443",
+Since `tuic-server 1.2.0`, the new TOML format has been used. The old JSON format will be kept until `2.0.0`.
 
-    // User list, contains user UUID and password
-    "users": {
-        "00000000-0000-0000-0000-000000000000": "PASSWORD_0",
-        "00000000-0000-0000-0000-000000000001": "PASSWORD_1"
-    },
+`tuic-server -c server.toml`
 
-    // The path to the certificate file
-    "certificate": "PATH/TO/CERTIFICATE",
+```toml
+# server.toml
+### You can generate example configuration by using `tuic-server -i` or `tuic-server --init`
+### ALL settings are OPTIONAL, if you leave one empty, default value will be used
 
-    // The path to the private key file
-    "private_key": "PATH/TO/PRIVATE_KEY",
+log_level = "info" # Default: info
 
-    // Optional. Congestion control algorithm, available options:
-    // "cubic", "new_reno", "bbr"
-    // Default: "cubic"
-    "congestion_control": "cubic",
+# The socket address to listen on
+server = "[::]:443" # Default: "[::]:443"
 
-    // Optional. Application layer protocol negotiation
-    // Default being empty (no ALPN)
-    "alpn": ["h3", "spdy/3.1"],
+# Whether the server should create separate UDP sockets for relaying IPv6 UDP packets
+udp_relay_ipv6 = true # Default: true
 
-    // Optional. If the server should create separate UDP sockets for relaying IPv6 UDP packets
-    // Default: true
-    "udp_relay_ipv6": true,
+# Enable 0-RTT QUIC connection handshake on the server side
+# This is not impacting much on the performance, as the protocol is fully multiplexed
+# WARNING: Disabling this is highly recommended, as it is vulnerable to replay attacks. See https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/#attack-of-the-clones
+zero_rtt_handshake = false # Default: false
 
-    // Optional. Enable 0-RTT QUIC connection handshake on the server side
-    // This is not impacting much on the performance, as the protocol is fully multiplexed
-    // WARNING: Disabling this is highly recommended, as it is vulnerable to replay attacks. See https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/#attack-of-the-clones
-    // Default: false
-    "zero_rtt_handshake": false,
+# Set if the listening socket should be dual-stack
+# If this option is not set, the socket behavior is platform dependent
+dual_stack = true # Default: true
 
-    // Optional. Set if the listening socket should be dual-stack
-    // If this option is not set, the socket behavior is platform dependent
-    "dual_stack": true,
+# How long the server should wait for the client to send the authentication command
+auth_timeout = "3s" # Default: "3s"
 
-    // Optional. How long the server should wait for the client to send the authentication command
-    // Default: 3s
-    "auth_timeout": "3s",
+# Maximum duration server expects for task negotiation
+task_negotiation_timeout = "3s" # Default: "3s"
 
-    // Optional. Maximum duration server expects for task negotiation
-    // Default: 3s
-    "task_negotiation_timeout": "3s",
+# Interval between UDP packet fragment garbage collection
+gc_interval = "3s" # Default: "3s"
 
-    // Optional. How long the server should wait before closing an idle connection
-    // Default: 10s
-    "max_idle_time": "10s",
+# How long the server should keep a UDP packet fragment. Outdated fragments will be dropped
+gc_lifetime = "15s" # Default: "15s"
 
-    // Optional. Maximum packet size the server can receive from outbound UDP sockets, in bytes
-    // Default: 1500
-    "max_external_packet_size": 1500,
+# Maximum packet size the server can receive from outbound UDP sockets, in bytes
+max_external_packet_size = 1500
 
-    // Optional. Maximum number of bytes to transmit to a peer without acknowledgment
-    // Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-    // Default: 8MiB * 2
-    "send_window": 16777216,
+# How long should server perserve TCP and UDP I/O tasks.
+stream_timeout = "10s" # Default: "10s"
 
-    // Optional. Maximum number of bytes the peer may transmit without acknowledgement on any one stream before becoming blocked
-    // Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-    // Default: 8MiB
-    "receive_window": 8388608,
+# User list, contains user UUID and password
+[users] # Default: empty
+f0e12827-fe60-458c-8269-a05ccb0ff8da = "YOUR_USER_PASSWD_HERE"
 
-    // Optional. Interval between UDP packet fragment garbage collection
-    // Default: 3s
-    "gc_interval": "3s",
+[tls]
+# Whether use auto-generated self-signed certificate and key.
+# When enabled, the follwing `certificate` and `private_key` fields will be ignored.
+self_sign = true # Default: false
 
-    // Optional. How long the server should keep a UDP packet fragment. Outdated fragments will be dropped
-    // Default: 15s
-    "gc_lifetime": "15s",
+# The path to the certificate file
+certificate = "" # Default: ""
 
     // Optional. Set the log level
     // Default: "warn"
@@ -115,6 +142,49 @@ tuic-server -c PATH/TO/CONFIG
 
 }
 ```
+## Notes
+To automatically get TLS cert and key, recommend use [acme.sh](https://github.com/acmesh-official/acme.sh)
+```sh
+acme.sh --issue -d www.yourdomain.org --standalone
+acme.sh --install-cert -d www.yourdomain.org \
+--key-file       /CERT_PATH/key.crt  \
+--fullchain-file /CERT_PATH/cert.crt
+```
+
+## RESTful API
+With authorization header when making a request. `curl -H 'Authorization: Bearer YOUR_SECRET_HERE' http://ip:port/path`
+
+Or with authorization disabled `curl  http://ip:port/path`
+
+APIs:
+- GET `http://ip:port/online`
+  > List online clients' count.
+  Response: TODO
+
+- GET `http://ip:port/detailed_online`
+  > List online clients' IP address and port.
+  Response: TODO
+
+- POST `http://ip:port/kick`
+
+  Request: ["userA", "userB"]
+  > Clients can always reconnect after being kicked.
+
+  Response: TODO
+
+- GET `http://ip:port/traffic`
+
+  Return current traffic stats.
+  > Traffic data will be lost when `tuic-server` restarts.
+
+  Response: TODO
+
+- GET `http://ip:port/reset_traffic`
+
+  Reset traffic stats and return previous traffic stats.
+  > Traffic data will be lost when `tuic-server` restarts.
+
+  Response: TODO
 
 ## License
 

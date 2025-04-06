@@ -3,7 +3,7 @@
 Minimalistic TUIC client implementation as a reference
 
 [![Version](https://img.shields.io/crates/v/tuic-client.svg?style=flat)](https://crates.io/crates/tuic-client)
-[![License](https://img.shields.io/crates/l/tuic-client.svg?style=flat)](https://github.com/EAimTY/tuic/blob/dev/LICENSE)
+[![License](https://img.shields.io/crates/l/tuic-client.svg?style=flat)](https://github.com/Itsusinn/tuic/blob/dev/LICENSE)
 
 # Overview
 
@@ -13,7 +13,7 @@ This implementation only contains the most basic requirements of a functional TU
 
 ## Usage
 
-Download the latest binary from [releases](https://github.com/EAimTY/tuic/releases).
+Download the latest binary from [releases](https://github.com/Itsusinn/tuic/releases).
 
 Or install from [crates.io](https://crates.io/crates/tuic-client):
 
@@ -103,6 +103,24 @@ tuic-client -c PATH/TO/CONFIG
         // Default: 8MiB
         "receive_window": 8388608,
 
+        // Optional. The initial value to be used as the maximum UDP payload size before running MTU discovery
+        // Must be at least 1200
+        // Default: 1200
+        "initial_mtu": 1200,
+
+        // Optional. The maximum UDP payload size guaranteed to be supported by the network.
+        // Must be at least 1200
+        // Default: 1200
+        "min_mtu": 1200,
+
+        // Optional. Whether to use `Generic Segmentation Offload` to accelerate transmits, when supported by the environment.
+        // Default: true
+        "gso": true,
+
+        // Optional. Whether to enable Path MTU Discovery to optimize packet size for transmission.
+        // Default: true
+        "pmtu": true,
+
         // Optional. Interval between UDP packet fragment garbage collection
         // Default: 3s
         "gc_interval": "3s",
@@ -128,7 +146,6 @@ tuic-client -c PATH/TO/CONFIG
 
         // Optional. Set the password for socks5 authentication
         "password": "PASSWORD",
-        
         // Optional. Set if the listening socket should be dual-stack
         // If this option is not set, the socket behavior is platform dependent
         "dual_stack": true,

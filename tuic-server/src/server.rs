@@ -1,109 +1,131 @@
-use crate::{
-    config::Config,
-    connection::{Connection, DEFAULT_CONCURRENT_STREAMS},
-    error::Error,
-    utils::{self, CongestionControl},
-};
-use quinn_jls::{
-    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
-    Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
-};
-use rustls_jls::{version, ServerConfig as RustlsServerConfig};
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::{
-    collections::HashMap,
     net::{SocketAddr, UdpSocket as StdUdpSocket},
     sync::Arc,
-    time::Duration,
 };
-use uuid::Uuid;
+
+use eyre::Context;
+use quinn::{
+    Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt,
+    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
+    crypto::rustls::QuicServerConfig,
+};
+use rustls::{
+    ServerConfig as RustlsServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use tracing::{debug, warn};
+
+use crate::{
+    AppContext,
+    connection::{Connection, INIT_CONCURRENT_STREAMS},
+    error::Error,
+    tls::CertResolver,
+    utils::CongestionController,
+};
 
 pub struct Server {
     ep: Endpoint,
-    users: Arc<HashMap<Uuid, Box<[u8]>>>,
-    udp_relay_ipv6: bool,
-    zero_rtt_handshake: bool,
-    auth_timeout: Duration,
-    task_negotiation_timeout: Duration,
-    max_external_pkt_size: usize,
-    gc_interval: Duration,
-    gc_lifetime: Duration,
+    ctx: Arc<AppContext>,
 }
 
 impl Server {
-    pub fn init(cfg: Config) -> Result<Self, Error> {
-        let certs;
-        let priv_key;
-        if cfg.certificate.is_none() || cfg.private_key.is_none() {
-            let rcgen::CertifiedKey { cert, key_pair } =
-                rcgen::generate_simple_self_signed(vec![cfg.jls_upstream.clone().into()]).unwrap();
-            let cert_der = cert.der();
-            priv_key = rustls_jls::PrivateKey(key_pair.serialize_der());
-            certs = vec![rustls_jls::Certificate(cert_der.to_vec())];
-            log::info!("[quic-jls] generate self-signed cert automatically");
+    pub async fn init(ctx: Arc<AppContext>) -> Result<Self, Error> {
+        let mut crypto: RustlsServerConfig;
+        if ctx.cfg.tls.self_sign {
+            let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+            let cert_der = CertificateDer::from(cert.cert);
+            let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+            crypto = RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_no_client_auth()
+                .with_single_cert(vec![cert_der], PrivateKeyDer::Pkcs8(priv_key))?;
         } else {
-            certs = utils::load_certs(cfg.certificate.unwrap())?;
-            priv_key = utils::load_priv_key(cfg.private_key.unwrap())?;
+            let cert_resolver =
+                CertResolver::new(&ctx.cfg.tls.certificate, &ctx.cfg.tls.private_key).await?;
+
+            crypto = RustlsServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_no_client_auth()
+                .with_cert_resolver(cert_resolver);
         }
-        let mut crypto = RustlsServerConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_protocol_versions(&[&version::TLS13])
-            .unwrap()
-            .with_no_client_auth()
-            .with_single_cert(certs, priv_key)?;
 
-        crypto.alpn_protocols = cfg.alpn;
+        crypto.alpn_protocols = ctx
+            .cfg
+            .tls
+            .alpn
+            .iter()
+            .cloned()
+            .map(|alpn| alpn.into_bytes())
+            .collect();
+        // TODO only set when 0-RTT enabled
         crypto.max_early_data_size = u32::MAX;
-        crypto.send_half_rtt_data = cfg.zero_rtt_handshake;
+        crypto.send_half_rtt_data = ctx.cfg.zero_rtt_handshake;
+        crypto.jls_config = rustls::JlsServerConfig::new(
+            &ctx.cfg.tls.jls_pwd,
+            &ctx.cfg.tls.jls_iv,
+            &ctx.cfg.tls.jls_upstream,
+        );
 
-        crypto.jls_config = rustls_jls::JlsServerConfig::new(&cfg.jls_pwd, &cfg.jls_iv, &cfg.jls_upstream)
-        .expect("Wrong upstream url format");
-
-        let mut config = ServerConfig::with_crypto(Arc::new(crypto));
+        let mut config = ServerConfig::with_crypto(Arc::new(
+            QuicServerConfig::try_from(crypto).context("no initial cipher suite found")?,
+        ));
         let mut tp_cfg = TransportConfig::default();
 
         tp_cfg
-            .max_concurrent_bidi_streams(VarInt::from(DEFAULT_CONCURRENT_STREAMS))
-            .max_concurrent_uni_streams(VarInt::from(DEFAULT_CONCURRENT_STREAMS))
-            .send_window(cfg.send_window)
-            .stream_receive_window(VarInt::from_u32(cfg.receive_window))
+            .max_concurrent_bidi_streams(VarInt::from(INIT_CONCURRENT_STREAMS))
+            .max_concurrent_uni_streams(VarInt::from(INIT_CONCURRENT_STREAMS))
+            .send_window(ctx.cfg.quic.send_window)
+            .stream_receive_window(VarInt::from_u32(ctx.cfg.quic.receive_window))
             .max_idle_timeout(Some(
-                IdleTimeout::try_from(cfg.max_idle_time).map_err(|_| Error::InvalidMaxIdleTime)?,
-            ));
+                IdleTimeout::try_from(ctx.cfg.quic.max_idle_time)
+                    .map_err(|_| Error::InvalidMaxIdleTime)?,
+            ))
+            .initial_mtu(ctx.cfg.quic.initial_mtu)
+            .min_mtu(ctx.cfg.quic.min_mtu)
+            .enable_segmentation_offload(ctx.cfg.quic.gso)
+            .mtu_discovery_config(if !ctx.cfg.quic.pmtu {
+                None
+            } else {
+                Some(Default::default())
+            });
 
-        match cfg.congestion_control {
-            CongestionControl::Cubic => {
-                tp_cfg.congestion_controller_factory(Arc::new(CubicConfig::default()))
+        match ctx.cfg.quic.congestion_control.controller {
+            CongestionController::Bbr => {
+                let mut bbr_config = BbrConfig::default();
+                bbr_config.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+                tp_cfg.congestion_controller_factory(Arc::new(bbr_config))
             }
-            CongestionControl::NewReno => {
-                tp_cfg.congestion_controller_factory(Arc::new(NewRenoConfig::default()))
+            CongestionController::Cubic => {
+                let mut cubic_config = CubicConfig::default();
+                cubic_config.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+                tp_cfg.congestion_controller_factory(Arc::new(cubic_config))
             }
-            CongestionControl::Bbr => {
-                tp_cfg.congestion_controller_factory(Arc::new(BbrConfig::default()))
+            CongestionController::NewReno => {
+                let mut new_reno = NewRenoConfig::default();
+                new_reno.initial_window(ctx.cfg.quic.congestion_control.initial_window);
+                tp_cfg.congestion_controller_factory(Arc::new(new_reno))
             }
         };
 
         config.transport_config(Arc::new(tp_cfg));
 
         let socket = {
-            let domain = match cfg.server {
+            let domain = match ctx.cfg.server {
                 SocketAddr::V4(_) => Domain::IPV4,
                 SocketAddr::V6(_) => Domain::IPV6,
             };
 
             let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))
-                .map_err(|err| Error::Socket("failed to create endpoint UDP socket", err))?;
+                .context("failed to create endpoint UDP socket")?;
 
-            if let Some(dual_stack) = cfg.dual_stack {
-                socket.set_only_v6(!dual_stack).map_err(|err| {
+            if ctx.cfg.dual_stack {
+                socket.set_only_v6(!ctx.cfg.dual_stack).map_err(|err| {
                     Error::Socket("endpoint dual-stack socket setting error", err)
                 })?;
             }
 
             socket
-                .bind(&SockAddr::from(cfg.server))
-                .map_err(|err| Error::Socket("failed to bind endpoint UDP socket", err))?;
+                .bind(&SockAddr::from(ctx.cfg.server))
+                .context("failed to bind endpoint UDP socket")?;
 
             StdUdpSocket::from(socket)
         };
@@ -115,41 +137,33 @@ impl Server {
             Arc::new(TokioRuntime),
         )?;
 
-        Ok(Self {
-            ep,
-            users: Arc::new(cfg.users),
-            udp_relay_ipv6: cfg.udp_relay_ipv6,
-            zero_rtt_handshake: cfg.zero_rtt_handshake,
-            auth_timeout: cfg.auth_timeout,
-            task_negotiation_timeout: cfg.task_negotiation_timeout,
-            max_external_pkt_size: cfg.max_external_packet_size,
-            gc_interval: cfg.gc_interval,
-            gc_lifetime: cfg.gc_lifetime,
-        })
+        Ok(Self { ep, ctx })
     }
 
     pub async fn start(&self) {
-        log::warn!(
+        warn!(
             "server started, listening on {}",
             self.ep.local_addr().unwrap()
         );
+        if self.ctx.cfg.restful.is_some() {
+            tokio::spawn(crate::restful::start(self.ctx.clone()));
+        }
 
         loop {
-            let Some(conn) = self.ep.accept().await else {
-                return;
-            };
-
-            tokio::spawn(Connection::handle(
-                conn,
-                self.users.clone(),
-                self.udp_relay_ipv6,
-                self.zero_rtt_handshake,
-                self.auth_timeout,
-                self.task_negotiation_timeout,
-                self.max_external_pkt_size,
-                self.gc_interval,
-                self.gc_lifetime,
-            ));
+            match self.ep.accept().await {
+                Some(conn) => match conn.accept() {
+                    Ok(conn) => {
+                        tokio::spawn(Connection::handle(self.ctx.clone(), conn));
+                    }
+                    Err(e) => {
+                        debug!("[Incoming] Failed to accept connection: {e}");
+                    }
+                },
+                None => {
+                    debug!("[Incoming] the endpoint is closed");
+                    return;
+                }
+            }
         }
     }
 }

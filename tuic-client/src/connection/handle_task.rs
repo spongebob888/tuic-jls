@@ -1,89 +1,112 @@
-use super::Connection;
-use crate::{error::Error, socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::UdpRelayMode};
-use bytes::Bytes;
-use log::debug;
-use quinn_jls::ZeroRttAccepted;
-use socks5_proto::Address as Socks5Address;
 use std::time::Duration;
+
+use bytes::Bytes;
+use quinn::{VarInt, ZeroRttAccepted};
+use socks5_proto::Address as Socks5Address;
 use tokio::time;
+use tracing::{debug, error, info, warn};
 use tuic::Address;
 use tuic_quinn::{Connect, Packet};
 
+use super::Connection;
+use crate::{error::Error, socks5::UDP_SESSIONS as SOCKS5_UDP_SESSIONS, utils::UdpRelayMode};
+
 impl Connection {
     pub async fn authenticate(self, zero_rtt_accepted: Option<ZeroRttAccepted>) {
+        let conn_ref = self.conn.clone();
         if let Some(zero_rtt_accepted) = zero_rtt_accepted {
             debug!("[relay] [authenticate] waiting for connection to be fully established");
-            tokio::spawn( async {
+            tokio::spawn(async move {
                 match zero_rtt_accepted.await {
                     true => debug!("[relay] [authenticate] zero rtt acepted"),
-                    false => debug!("[relay] [authenticate] zero rtt rejected"),  
+                    false => debug!("[relay] [authenticate] zero rtt rejected"),
                 };
+                if conn_ref.is_jls() == Some(false) {
+                    error!("[relay] [jls] connection hijacked or wrong password/iv");
+                    conn_ref.close(VarInt::from_u32(0), b"No Reason");
+                }
             });
-            if self.conn.is_jls() == Some(false) {
-                log::error!("[relay] [jls] connection hijacked or wrong password/iv");
-            }
+        } else if conn_ref.is_jls() == Some(false) {
+            error!("[relay] [jls] connection hijacked or wrong password/iv");
+            conn_ref.close(VarInt::from_u32(0), b"No Reason");
         }
-        log::debug!("[relay] [authenticate] sending authentication");
 
-        match self
-            .model
-            .authenticate(self.uuid, self.password.clone())
-            .await
-        {
-            Ok(()) => log::info!("[relay] [authenticate] {uuid}", uuid = self.uuid),
-            Err(err) => log::warn!("[relay] [authenticate] authentication sending error: {err}"),
-        }
+        debug!("[relay] [authenticate] skip authentication for jls");
     }
 
     pub async fn connect(&self, addr: Address) -> Result<Connect, Error> {
         let addr_display = addr.to_string();
-        log::info!("[relay] [connect] {addr_display}");
+        info!("[relay] [connect] {addr_display}");
 
+        let rate: f32 = (self.conn.stats().path.lost_packets as f32)
+            / ((self.conn.stats().path.sent_packets + 1) as f32);
+        debug!(
+            "[relay] [connect] packet_loss_rate:{:.2}%, rtt:{:?}, mtu:{}",
+            rate * 100.0,
+            self.conn.rtt(),
+            self.conn.stats().path.current_mtu,
+        );
         match self.model.connect(addr).await {
-            Ok(conn) => Ok(conn),
+            Ok(conn) => {
+                if self.conn.is_jls() == Some(false) {
+                    error!("[relay] [jls] connection hijacked or wrong password/iv");
+                    self.conn.close(VarInt::from_u32(0), b"No Reason");
+                    return Err(anyhow::anyhow!("JLS Hijacked or wrong password/iv").into());
+                }
+                Ok(conn)
+            }
             Err(err) => {
-                log::warn!("[relay] [connect] failed initializing relay to {addr_display}: {err}");
+                warn!("[relay] [connect] failed initializing relay to {addr_display}: {err}");
                 Err(Error::Model(err))
             }
         }
     }
 
-    pub async fn packet(&self, pkt: Bytes, addr: Address, assoc_id: u16) -> Result<(), Error> {
+    pub async fn packet(&self, pkt: Bytes, addr: Address, assoc_id: u16) -> eyre::Result<()> {
         let addr_display = addr.to_string();
+
+        if self.conn.is_jls() == Some(false) {
+            error!("[relay] [jls] connection hijacked or wrong password/iv");
+            self.conn.close(VarInt::from_u32(0), b"No Reason");
+            return Err(eyre::eyre!("JLS Hijacked or wrong password/iv"));
+        }
 
         match self.udp_relay_mode {
             UdpRelayMode::Native => {
-                log::info!("[relay] [packet] [{assoc_id:#06x}] [to-native] to {addr_display}");
+                info!("[relay] [packet] [{assoc_id:#06x}] [to-native] to {addr_display}");
                 match self.model.packet_native(pkt, addr, assoc_id) {
                     Ok(()) => Ok(()),
                     Err(err) => {
-                        log::warn!("[relay] [packet] [{assoc_id:#06x}] [to-native] to {addr_display}: {err}");
-                        Err(Error::Model(err))
+                        warn!(
+                            "[relay] [packet] [{assoc_id:#06x}] [to-native] to {addr_display}: \
+                             {err}"
+                        );
+                        Err(err)?
                     }
                 }
             }
             UdpRelayMode::Quic => {
-                log::info!("[relay] [packet] [{assoc_id:#06x}] [to-quic] {addr_display}");
+                info!("[relay] [packet] [{assoc_id:#06x}] [to-quic] {addr_display}");
                 match self.model.packet_quic(pkt, addr, assoc_id).await {
                     Ok(()) => Ok(()),
                     Err(err) => {
-                        log::warn!(
+                        warn!(
                             "[relay] [packet] [{assoc_id:#06x}] [to-quic] to {addr_display}: {err}"
                         );
-                        Err(Error::Model(err))
+                        Err(err)
                     }
                 }
             }
         }
     }
 
-    pub async fn dissociate(&self, assoc_id: u16) -> Result<(), Error> {
-        log::info!("[relay] [dissociate] [{assoc_id:#06x}]");
+    pub async fn dissociate(&self, assoc_id: u16) -> eyre::Result<()> {
+        info!("[relay] [dissociate] [{assoc_id:#06x}]");
         match self.model.dissociate(assoc_id).await {
             Ok(()) => Ok(()),
             Err(err) => {
-                log::warn!("[relay] [dissociate] [{assoc_id:#06x}] {err}");
-                Err(Error::Model(err))
+                warn!("[relay] [dissociate] [{assoc_id:#06x}] {err}");
+                Err(err)?
             }
         }
     }
@@ -101,8 +124,8 @@ impl Connection {
             }
 
             match self.model.heartbeat().await {
-                Ok(()) => log::debug!("[relay] [heartbeat]"),
-                Err(err) => log::warn!("[relay] [heartbeat] {err}"),
+                Ok(()) => debug!("[relay] [heartbeat]"),
+                Err(err) => warn!("[relay] [heartbeat] {err}"),
             }
         }
     }
@@ -119,15 +142,18 @@ impl Connection {
             unreachable!()
         };
 
-        log::info!(
-            "[relay] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment {frag_id}/{frag_total}",
+        info!(
+            "[relay] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment \
+             {frag_id}/{frag_total}",
             frag_id = pkt.frag_id() + 1,
             frag_total = pkt.frag_total(),
         );
 
         match pkt.accept().await {
             Ok(Some((pkt, addr, _))) => {
-                log::info!("[relay] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] from {addr}");
+                info!(
+                    "[relay] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] from {addr}"
+                );
 
                 let addr = match addr {
                     Address::None => unreachable!(),
@@ -140,22 +166,30 @@ impl Connection {
                 let session = SOCKS5_UDP_SESSIONS
                     .get()
                     .unwrap()
-                    .lock()
+                    .read()
+                    .await
                     .get(&assoc_id)
                     .cloned();
 
                 if let Some(session) = session {
                     if let Err(err) = session.send(pkt, addr).await {
-                        log::warn!(
-                            "[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] failed sending packet to socks5 client: {err}",
+                        warn!(
+                            "[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] \
+                             failed sending packet to socks5 client: {err}",
                         );
                     }
                 } else {
-                    log::warn!("[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] unable to find socks5 associate session");
+                    warn!(
+                        "[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] unable \
+                         to find socks5 associate session"
+                    );
                 }
             }
             Ok(None) => {}
-            Err(err) => log::warn!("[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] packet receiving error: {err}"),
+            Err(err) => warn!(
+                "[relay] [packet] [{assoc_id:#06x}] [from-native] [{pkt_id:#06x}] packet \
+                 receiving error: {err}"
+            ),
         }
     }
 }

@@ -1,15 +1,18 @@
+use std::sync::atomic::Ordering;
+
+use bytes::Bytes;
+use quinn::{RecvStream, SendStream, VarInt};
+use register_count::Register;
+use tokio::time;
+use tracing::{debug, warn};
+use tuic_quinn::Task;
+
 use super::Connection;
 use crate::{error::Error, utils::UdpRelayMode};
-use bytes::Bytes;
-use quinn_jls::{RecvStream, SendStream, VarInt};
-use register_count::Register;
-use std::sync::atomic::Ordering;
-use tokio::time;
-use tuic_quinn::Task;
 
 impl Connection {
     pub async fn handle_uni_stream(self, recv: RecvStream, _reg: Register) {
-        log::debug!(
+        debug!(
             "[{id:#010x}] [{addr}] [{user}] incoming unidirectional stream",
             id = self.id(),
             addr = self.inner.remote_address(),
@@ -28,23 +31,23 @@ impl Connection {
 
         let pre_process = async {
             let task = time::timeout(
-                self.task_negotiation_timeout,
+                self.ctx.cfg.task_negotiation_timeout,
                 self.model.accept_uni_stream(recv),
             )
             .await
             .map_err(|_| Error::TaskNegotiationTimeout)??;
 
             if let Task::Authenticate(auth) = &task {
-                self.authenticate(auth)?;
+                self.authenticate(auth).await?;
             }
 
             tokio::select! {
-                () = self.auth.clone() => {}
+                () = self.auth.wait() => {}
                 err = self.inner.closed() => return Err(Error::from(err)),
             };
 
             let same_pkt_src = matches!(task, Task::Packet(_))
-                && matches!(self.udp_relay_mode.load(), Some(UdpRelayMode::Native));
+                && matches!(**self.udp_relay_mode.load(), Some(UdpRelayMode::Native));
             if same_pkt_src {
                 return Err(Error::UnexpectedPacketSource);
             }
@@ -58,19 +61,22 @@ impl Connection {
             Ok(Task::Dissociate(assoc_id)) => self.handle_dissociate(assoc_id).await,
             Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
             Err(err) => {
-                log::warn!(
-                    "[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream error: {err}",
+                warn!(
+                    "[{id:#010x}] [{addr}] [{user}] handling incoming unidirectional stream \
+                     error: {err}",
                     id = self.id(),
                     addr = self.inner.remote_address(),
                     user = self.auth,
                 );
-                self.close();
+                self.close(&format!(
+                    "A serious error occurred at unidirectional stream pre-process stage {err}"
+                ));
             }
         }
     }
 
     pub async fn handle_bi_stream(self, (send, recv): (SendStream, RecvStream), _reg: Register) {
-        log::debug!(
+        debug!(
             "[{id:#010x}] [{addr}] [{user}] incoming bidirectional stream",
             id = self.id(),
             addr = self.inner.remote_address(),
@@ -89,14 +95,14 @@ impl Connection {
 
         let pre_process = async {
             let task = time::timeout(
-                self.task_negotiation_timeout,
+                self.ctx.cfg.task_negotiation_timeout,
                 self.model.accept_bi_stream(send, recv),
             )
             .await
             .map_err(|_| Error::TaskNegotiationTimeout)??;
 
             tokio::select! {
-                () = self.auth.clone() => {}
+                () = self.auth.wait() => {}
                 err = self.inner.closed() => return Err(Error::from(err)),
             };
 
@@ -107,19 +113,22 @@ impl Connection {
             Ok(Task::Connect(conn)) => self.handle_connect(conn).await,
             Ok(_) => unreachable!(), // already filtered in `tuic_quinn`
             Err(err) => {
-                log::warn!(
-                    "[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: {err}",
+                warn!(
+                    "[{id:#010x}] [{addr}] [{user}] handling incoming bidirectional stream error: \
+                     {err}",
                     id = self.id(),
                     addr = self.inner.remote_address(),
                     user = self.auth,
                 );
-                self.close();
+                self.close(&format!(
+                    "A serious error occurred at bidirectional stream pre-process stage {err}"
+                ));
             }
         }
     }
 
     pub async fn handle_datagram(self, dg: Bytes) {
-        log::debug!(
+        debug!(
             "[{id:#010x}] [{addr}] [{user}] incoming datagram",
             id = self.id(),
             addr = self.inner.remote_address(),
@@ -130,12 +139,12 @@ impl Connection {
             let task = self.model.accept_datagram(dg)?;
 
             tokio::select! {
-                () = self.auth.clone() => {}
+                () = self.auth.wait() => {}
                 err = self.inner.closed() => return Err(Error::from(err)),
             };
 
             let same_pkt_src = matches!(task, Task::Packet(_))
-                && matches!(self.udp_relay_mode.load(), Some(UdpRelayMode::Quic));
+                && matches!(**self.udp_relay_mode.load(), Some(UdpRelayMode::Quic));
             if same_pkt_src {
                 return Err(Error::UnexpectedPacketSource);
             }
@@ -148,13 +157,15 @@ impl Connection {
             Ok(Task::Heartbeat) => self.handle_heartbeat().await,
             Ok(_) => unreachable!(),
             Err(err) => {
-                log::warn!(
+                warn!(
                     "[{id:#010x}] [{addr}] [{user}] handling incoming datagram error: {err}",
                     id = self.id(),
                     addr = self.inner.remote_address(),
                     user = self.auth,
                 );
-                self.close();
+                self.close(&format!(
+                    "A serious error occurred at datagram pre-process stage {err}"
+                ));
             }
         }
     }

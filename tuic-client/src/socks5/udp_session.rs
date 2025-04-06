@@ -1,19 +1,21 @@
-use crate::error::Error;
-use bytes::Bytes;
-use once_cell::sync::OnceCell;
-use parking_lot::Mutex;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use socks5_proto::Address;
-use socks5_server::AssociatedUdpSocket;
 use std::{
     collections::HashMap,
     io::{Error as IoError, ErrorKind},
     net::{IpAddr, SocketAddr, UdpSocket as StdUdpSocket},
     sync::Arc,
 };
-use tokio::net::UdpSocket;
 
-pub static UDP_SESSIONS: OnceCell<Mutex<HashMap<u16, UdpSession>>> = OnceCell::new();
+use bytes::Bytes;
+use once_cell::sync::OnceCell;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use socks5_proto::Address;
+use socks5_server::AssociatedUdpSocket;
+use tokio::{net::UdpSocket, sync::RwLock as AsyncRwLock};
+use tracing::{debug, warn};
+
+use crate::error::Error;
+
+pub static UDP_SESSIONS: OnceCell<AsyncRwLock<HashMap<u16, UdpSession>>> = OnceCell::new();
 
 #[derive(Clone)]
 pub struct UdpSession {
@@ -75,16 +77,18 @@ impl UdpSession {
     pub async fn send(&self, pkt: Bytes, src_addr: Address) -> Result<(), Error> {
         let src_addr_display = src_addr.to_string();
 
-        log::debug!(
-            "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] send packet from {src_addr_display} to {dst_addr}",
+        debug!(
+            "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] send packet from \
+             {src_addr_display} to {dst_addr}",
             ctrl_addr = self.ctrl_addr,
             assoc_id = self.assoc_id,
             dst_addr = self.socket.peer_addr().unwrap(),
         );
 
         if let Err(err) = self.socket.send(pkt, 0, src_addr).await {
-            log::warn!(
-                "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] send packet from {src_addr_display} to {dst_addr} error: {err}",
+            warn!(
+                "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] send packet from \
+                 {src_addr_display} to {dst_addr} error: {err}",
                 ctrl_addr = self.ctrl_addr,
                 assoc_id = self.assoc_id,
                 dst_addr = self.socket.peer_addr().unwrap(),
@@ -137,8 +141,9 @@ impl UdpSession {
             ))?;
         }
 
-        log::debug!(
-            "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] receive packet from {src_addr} to {dst_addr}",
+        debug!(
+            "[socks5] [{ctrl_addr}] [associate] [{assoc_id:#06x}] receive packet from {src_addr} \
+             to {dst_addr}",
             ctrl_addr = self.ctrl_addr,
             assoc_id = self.assoc_id
         );

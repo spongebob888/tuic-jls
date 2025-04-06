@@ -1,6 +1,7 @@
-use quinn_jls::{ConnectError, ConnectionError};
-use rustls_jls::Error as RustlsError;
 use std::io::Error as IoError;
+
+use quinn::{ConnectError, ConnectionError};
+use rustls::Error as RustlsError;
 use thiserror::Error;
 use tuic_quinn::Error as ModelError;
 
@@ -12,8 +13,6 @@ pub enum Error {
     Connect(#[from] ConnectError),
     #[error(transparent)]
     Model(#[from] ModelError),
-    #[error("load native certificates error: {0}")]
-    LoadNativeCerts(IoError),
     #[error(transparent)]
     Rustls(#[from] RustlsError),
     #[error("{0}: {1}")]
@@ -26,6 +25,8 @@ pub enum Error {
     WrongPacketSource,
     #[error("invalid socks5 authentication")]
     InvalidSocks5Auth,
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 impl From<ConnectionError> for Error {

@@ -32,3 +32,9 @@ impl Heartbeat {
 impl From<Heartbeat> for () {
     fn from(_: Heartbeat) -> Self {}
 }
+
+impl Default for Heartbeat {
+    fn default() -> Self {
+        Self::new()
+    }
+}

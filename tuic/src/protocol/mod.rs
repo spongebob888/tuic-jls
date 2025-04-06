@@ -57,9 +57,9 @@ pub enum Header {
 impl Header {
     pub const TYPE_CODE_AUTHENTICATE: u8 = Authenticate::type_code();
     pub const TYPE_CODE_CONNECT: u8 = Connect::type_code();
-    pub const TYPE_CODE_PACKET: u8 = Packet::type_code();
     pub const TYPE_CODE_DISSOCIATE: u8 = Dissociate::type_code();
     pub const TYPE_CODE_HEARTBEAT: u8 = Heartbeat::type_code();
+    pub const TYPE_CODE_PACKET: u8 = Packet::type_code();
 
     /// Returns the command type code
     pub const fn type_code(&self) -> u8 {
@@ -104,11 +104,13 @@ impl Header {
 /// The address type can be one of the following:
 ///
 /// - `0xff`: None
-/// - `0x00`: Fully-qualified domain name (the first byte indicates the length of the domain name)
+/// - `0x00`: Fully-qualified domain name (the first byte indicates the length
+///   of the domain name)
 /// - `0x01`: IPv4 address
 /// - `0x02`: IPv6 address
 ///
-/// Address type `None` is used in `Packet` commands that is not the first fragment of a UDP packet.
+/// Address type `None` is used in `Packet` commands that is not the first
+/// fragment of a UDP packet.
 ///
 /// The port number is encoded in 2 bytes after the Domain name / IP address.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -119,16 +121,16 @@ pub enum Address {
 }
 
 impl Address {
-    pub const TYPE_CODE_NONE: u8 = 0xff;
     pub const TYPE_CODE_DOMAIN: u8 = 0x00;
     pub const TYPE_CODE_IPV4: u8 = 0x01;
     pub const TYPE_CODE_IPV6: u8 = 0x02;
+    pub const TYPE_CODE_NONE: u8 = 0xff;
 
     /// Returns the address type code
     pub const fn type_code(&self) -> u8 {
         match self {
             Self::None => Self::TYPE_CODE_NONE,
-            Self::DomainAddress(_, _) => Self::TYPE_CODE_DOMAIN,
+            Self::DomainAddress(..) => Self::TYPE_CODE_DOMAIN,
             Self::SocketAddress(addr) => match addr {
                 SocketAddr::V4(_) => Self::TYPE_CODE_IPV4,
                 SocketAddr::V6(_) => Self::TYPE_CODE_IPV6,

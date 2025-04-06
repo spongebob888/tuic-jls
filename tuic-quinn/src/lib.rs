@@ -1,12 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-use self::side::Side;
-use bytes::{BufMut, Bytes, BytesMut};
-use futures_util::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use quinn_jls::{
-    Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError, SendStream,
-    UnknownStream, VarInt,
-};
 use std::{
     fmt::{Debug, Formatter, Result as FmtResult},
     io::{Cursor, Error as IoError},
@@ -14,17 +7,28 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
+
+use bytes::{BufMut, Bytes, BytesMut};
+pub use quinn;
+use quinn::{
+    ClosedStream, Connection as QuinnConnection, ConnectionError, RecvStream, SendDatagramError,
+    SendStream, VarInt,
+};
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+use tracing::warn;
 use tuic::{
+    Address, Header, UnmarshalError,
     model::{
-        side::{Rx, Tx},
         AssembleError, Authenticate as AuthenticateModel, Connect as ConnectModel,
         Connection as ConnectionModel, KeyingMaterialExporter as KeyingMaterialExporterImpl,
         Packet as PacketModel,
+        side::{Rx, Tx},
     },
-    Address, Header, UnmarshalError,
 };
 use uuid::Uuid;
+
+use self::side::Side;
 
 pub mod side {
     //! Side marker types for a connection.
@@ -42,7 +46,8 @@ pub mod side {
 
 /// The TUIC Connection.
 ///
-/// This struct takes a clone of `quinn::Connection` for performing TUIC operations.
+/// This struct takes a clone of `quinn::Connection` for performing TUIC
+/// operations.
 ///
 /// See more details about the TUIC protocol at [SPEC.md](https://github.com/EAimTY/tuic/blob/dev/tuic/SPEC.md)
 #[derive(Clone)]
@@ -59,9 +64,9 @@ impl<Side> Connection<Side> {
         pkt: impl AsRef<[u8]>,
         addr: Address,
         assoc_id: u16,
-    ) -> Result<(), Error> {
+    ) -> eyre::Result<()> {
         let Some(max_pkt_size) = self.conn.max_datagram_size() else {
-            return Err(Error::SendDatagram(SendDatagramError::Disabled));
+            return Err(Error::SendDatagram(SendDatagramError::Disabled))?;
         };
 
         let model = self.model.send_packet(assoc_id, addr, max_pkt_size);
@@ -82,16 +87,15 @@ impl<Side> Connection<Side> {
         pkt: impl AsRef<[u8]>,
         addr: Address,
         assoc_id: u16,
-    ) -> Result<(), Error> {
+    ) -> eyre::Result<()> {
         let model = self.model.send_packet(assoc_id, addr, u16::MAX as usize);
 
         for (header, frag) in model.into_fragments(pkt) {
             let mut send = self.conn.open_uni().await?;
             header.async_marshal(&mut send).await?;
-            AsyncWriteExt::write_all(&mut send, frag).await?;
-            send.close().await?;
+            send.write_all(frag).await?;
+            send.finish()?;
         }
-
         Ok(())
     }
 
@@ -105,7 +109,8 @@ impl<Side> Connection<Side> {
         self.model.task_associate_count()
     }
 
-    /// Removes packet fragments that can not be reassembled within the specified timeout
+    /// Removes packet fragments that can not be reassembled within the
+    /// specified timeout
     pub fn collect_garbage(&self, timeout: Duration) {
         self.model.collect_garbage(timeout);
     }
@@ -126,14 +131,14 @@ impl Connection<side::Client> {
     }
 
     /// Sends an `Authenticate` command.
-    pub async fn authenticate(&self, uuid: Uuid, password: impl AsRef<[u8]>) -> Result<(), Error> {
+    pub async fn authenticate(&self, uuid: Uuid, password: impl AsRef<[u8]>) -> eyre::Result<()> {
         let model = self
             .model
             .send_authenticate(uuid, password, &self.keying_material_exporter());
 
         let mut send = self.conn.open_uni().await?;
         model.header().async_marshal(&mut send).await?;
-        send.close().await?;
+        send.finish()?;
         Ok(())
     }
 
@@ -146,11 +151,11 @@ impl Connection<side::Client> {
     }
 
     /// Sends a `Dissociate` command.
-    pub async fn dissociate(&self, assoc_id: u16) -> Result<(), Error> {
+    pub async fn dissociate(&self, assoc_id: u16) -> eyre::Result<()> {
         let model = self.model.send_dissociate(assoc_id);
         let mut send = self.conn.open_uni().await?;
         model.header().async_marshal(&mut send).await?;
-        send.close().await?;
+        send.finish()?;
         Ok(())
     }
 
@@ -165,7 +170,8 @@ impl Connection<side::Client> {
 
     /// Try to parse a `quinn::RecvStream` as a TUIC command.
     ///
-    /// The `quinn::RecvStream` should be accepted by `quinn::Connection::accept_uni()` from the same `quinn::Connection`.
+    /// The `quinn::RecvStream` should be accepted by
+    /// `quinn::Connection::accept_uni()` from the same `quinn::Connection`.
     pub async fn accept_uni_stream(&self, mut recv: RecvStream) -> Result<Task, Error> {
         let header = match Header::async_unmarshal(&mut recv).await {
             Ok(header) => header,
@@ -190,9 +196,11 @@ impl Connection<side::Client> {
         }
     }
 
-    /// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a TUIC command.
+    /// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a
+    /// TUIC command.
     ///
-    /// The pair of stream should be accepted by `quinn::Connection::accept_bi()` from the same `quinn::Connection`.
+    /// The pair of stream should be accepted by
+    /// `quinn::Connection::accept_bi()` from the same `quinn::Connection`.
     pub async fn accept_bi_stream(
         &self,
         send: SendStream,
@@ -215,7 +223,8 @@ impl Connection<side::Client> {
 
     /// Try to parse a QUIC Datagram as a TUIC command.
     ///
-    /// The Datagram should be accepted by `quinn::Connection::read_datagram()` from the same `quinn::Connection`.
+    /// The Datagram should be accepted by `quinn::Connection::read_datagram()`
+    /// from the same `quinn::Connection`.
     pub fn accept_datagram(&self, dg: Bytes) -> Result<Task, Error> {
         let mut dg = Cursor::new(dg);
 
@@ -264,7 +273,8 @@ impl Connection<side::Server> {
 
     /// Try to parse a `quinn::RecvStream` as a TUIC command.
     ///
-    /// The `quinn::RecvStream` should be accepted by `quinn::Connection::accept_uni()` from the same `quinn::Connection`.
+    /// The `quinn::RecvStream` should be accepted by
+    /// `quinn::Connection::accept_uni()` from the same `quinn::Connection`.
     pub async fn accept_uni_stream(&self, mut recv: RecvStream) -> Result<Task, Error> {
         let header = match Header::async_unmarshal(&mut recv).await {
             Ok(header) => header,
@@ -293,9 +303,11 @@ impl Connection<side::Server> {
         }
     }
 
-    /// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a TUIC command.
+    /// Try to parse a pair of `quinn::SendStream` and `quinn::RecvStream` as a
+    /// TUIC command.
     ///
-    /// The pair of stream should be accepted by `quinn::Connection::accept_bi()` from the same `quinn::Connection`.
+    /// The pair of stream should be accepted by
+    /// `quinn::Connection::accept_bi()` from the same `quinn::Connection`.
     pub async fn accept_bi_stream(
         &self,
         send: SendStream,
@@ -321,7 +333,8 @@ impl Connection<side::Server> {
 
     /// Try to parse a QUIC Datagram as a TUIC command.
     ///
-    /// The Datagram should be accepted by `quinn::Connection::read_datagram()` from the same `quinn::Connection`.
+    /// The Datagram should be accepted by `quinn::Connection::read_datagram()`
+    /// from the same `quinn::Connection`.
     pub fn accept_datagram(&self, dg: Bytes) -> Result<Task, Error> {
         let mut dg = Cursor::new(dg);
 
@@ -391,8 +404,8 @@ impl Authenticate {
 /// A received `Connect` command.
 pub struct Connect {
     model: Side<ConnectModel<Tx>, ConnectModel<Rx>>,
-    send: SendStream,
-    recv: RecvStream,
+    pub send: SendStream,
+    pub recv: RecvStream,
 }
 
 impl Connect {
@@ -408,20 +421,32 @@ impl Connect {
     pub fn addr(&self) -> &Address {
         match &self.model {
             Side::Client(model) => {
-                let Header::Connect(conn) = model.header() else { unreachable!() };
+                let Header::Connect(conn) = model.header() else {
+                    unreachable!()
+                };
                 conn.addr()
             }
             Side::Server(model) => model.addr(),
         }
     }
 
-    /// Immediately closes the `Connect` streams with the given error code. Returns the result of closing the send and receive streams, respectively.
+    /// Immediately closes the `Connect` streams with the given error code.
+    /// Returns the result of closing the send and receive streams,
+    /// respectively.
     pub fn reset(
         &mut self,
         error_code: VarInt,
-    ) -> (Result<(), UnknownStream>, Result<(), UnknownStream>) {
+    ) -> (Result<(), ClosedStream>, Result<(), ClosedStream>) {
         let send_res = self.send.reset(error_code);
         let recv_res = self.recv.stop(error_code);
+        (send_res, recv_res)
+    }
+
+    /// Tx: send FIN mark
+    /// Rx: refuse accepting data
+    pub fn finish(&mut self) -> (Result<(), ClosedStream>, Result<(), ClosedStream>) {
+        let send_res = self.send.finish();
+        let recv_res = self.recv.stop(VarInt::from_u32(0));
         (send_res, recv_res)
     }
 }
@@ -430,8 +455,8 @@ impl AsyncRead for Connect {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<Result<usize, IoError>> {
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
         AsyncRead::poll_read(Pin::new(&mut self.get_mut().recv), cx, buf)
     }
 }
@@ -449,8 +474,11 @@ impl AsyncWrite for Connect {
         AsyncWrite::poll_flush(Pin::new(&mut self.get_mut().send), cx)
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), IoError>> {
-        AsyncWrite::poll_close(Pin::new(&mut self.get_mut().send), cx)
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        AsyncWrite::poll_shutdown(Pin::new(&mut self.get_mut().send), cx)
     }
 }
 
@@ -517,7 +545,8 @@ impl Packet {
         matches!(self.src, PacketSource::Native(_))
     }
 
-    /// Accepts the packet payload. If the packet is fragmented and not yet fully assembled, `Ok(None)` is returned.
+    /// Accepts the packet payload. If the packet is fragmented and not yet
+    /// fully assembled, `Ok(None)` is returned.
     pub async fn accept(self) -> Result<Option<(Bytes, Address, u16)>, Error> {
         let pkt = match self.src {
             PacketSource::Quic(mut recv) => {
@@ -555,9 +584,10 @@ struct KeyingMaterialExporter(QuinnConnection);
 impl KeyingMaterialExporterImpl for KeyingMaterialExporter {
     fn export_keying_material(&self, label: &[u8], context: &[u8]) -> [u8; 32] {
         let mut buf = [0; 32];
-        self.0
-            .export_keying_material(&mut buf, label, context)
-            .unwrap();
+        if let Err(err) = self.0.export_keying_material(&mut buf, label, context) {
+            warn!("export keying material error {:#?}", err);
+            buf = [0; 32];
+        }
         buf
     }
 }
@@ -566,7 +596,7 @@ impl KeyingMaterialExporterImpl for KeyingMaterialExporter {
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    Io(#[from] IoError),
+    IoError(#[from] IoError),
     #[error(transparent)]
     Connection(#[from] ConnectionError),
     #[error(transparent)]
@@ -589,4 +619,6 @@ pub enum Error {
     BadCommandBiStream(&'static str, SendStream, RecvStream),
     #[error("bad command `{0}` from datagram")]
     BadCommandDatagram(&'static str, Bytes),
+    #[error(transparent)]
+    QuicWriteError(#[from] quinn::WriteError),
 }

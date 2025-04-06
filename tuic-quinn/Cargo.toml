@@ -1,20 +1,22 @@
 [package]
 name = "tuic-quinn"
-version = "0.1.0"
-authors = ["EAimTY <ea.imty@gmail.com>"]
+version.workspace = true
+authors.workspace = true
 description = "A thin layer on top of quinn to provide functions for TUIC"
 categories = ["network-programming"]
 keywords = ["network", "proxy", "quic", "tuic"]
-edition = "2021"
-rust-version = "1.65.0"
-readme = "README.md"
-license = "GPL-3.0-or-later"
-repository = "https://github.com/EAimTY/tuic"
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-bytes = { version = "1.4.0", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.28", default-features = false, features = ["io", "std"] }
-quinn-jls = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-main", default-features = false, features = ["tls-rustls", "runtime-tokio", "futures-io"]}
-thiserror = { version = "1.0.40", default-features = false }
+tracing = { version = "0.1", default-features = false}
+bytes = { version = "1", default-features = false, features = ["std"] }
+quinn = { package = "quinn", git = "https://github.com/spongebob888/quinn-jls", branch = "jls-dev", default-features = false, features = ["futures-io"]}
+thiserror = { version = "2", default-features = false }
 tuic = { path = "../tuic", default-features = false, features = ["async_marshal", "marshal", "model"] }
-uuid = { version = "1.3.3", default-features = false, features = ["std"] }
+uuid = { version = "1", default-features = false, features = ["std"] }
+tokio = { version = "1", default-features = false, features = ["io-util"] }
+eyre = { version = "0" }

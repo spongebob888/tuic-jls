@@ -1,20 +1,22 @@
-use crate::{config::Local, error::Error};
-use once_cell::sync::OnceCell;
-use parking_lot::Mutex;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use socks5_server::{
-    auth::{NoAuth, Password},
-    Auth, Connection, Server as Socks5Server,
-};
 use std::{
     collections::HashMap,
     net::{SocketAddr, TcpListener as StdTcpListener},
     sync::{
-        atomic::{AtomicU16, Ordering},
         Arc,
+        atomic::{AtomicU16, Ordering},
     },
 };
-use tokio::net::TcpListener;
+
+use once_cell::sync::OnceCell;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use socks5_server::{
+    Auth, Connection, Server as Socks5Server,
+    auth::{NoAuth, Password},
+};
+use tokio::{net::TcpListener, sync::RwLock as AsyncRwLock};
+use tracing::{debug, info, warn};
+
+use crate::{config::Local, error::Error};
 
 mod handle_task;
 mod udp_session;
@@ -44,7 +46,7 @@ impl Server {
             .unwrap();
 
         UDP_SESSIONS
-            .set(Mutex::new(HashMap::new()))
+            .set(AsyncRwLock::new(HashMap::new()))
             .map_err(|_| "failed initializing socks5 UDP session pool")
             .unwrap();
 
@@ -110,7 +112,7 @@ impl Server {
     pub async fn start() {
         let server = SERVER.get().unwrap();
 
-        log::warn!(
+        warn!(
             "[socks5] server started, listening on {}",
             server.inner.local_addr().unwrap()
         );
@@ -118,13 +120,13 @@ impl Server {
         loop {
             match server.inner.accept().await {
                 Ok((conn, addr)) => {
-                    log::debug!("[socks5] [{addr}] connection established");
+                    debug!("[socks5] [{addr}] connection established");
 
                     tokio::spawn(async move {
                         match conn.handshake().await {
                             Ok(Connection::Associate(associate, _)) => {
                                 let assoc_id = server.next_assoc_id.fetch_add(1, Ordering::Relaxed);
-                                log::info!("[socks5] [{addr}] [associate] [{assoc_id:#06x}]");
+                                info!("[socks5] [{addr}] [associate] [{assoc_id:#06x}]");
                                 Self::handle_associate(
                                     associate,
                                     assoc_id,
@@ -134,20 +136,20 @@ impl Server {
                                 .await;
                             }
                             Ok(Connection::Bind(bind, _)) => {
-                                log::info!("[socks5] [{addr}] [bind]");
+                                info!("[socks5] [{addr}] [bind]");
                                 Self::handle_bind(bind).await;
                             }
                             Ok(Connection::Connect(connect, target_addr)) => {
-                                log::info!("[socks5] [{addr}] [connect] {target_addr}");
+                                info!("[socks5] [{addr}] [connect] {target_addr}");
                                 Self::handle_connect(connect, target_addr).await;
                             }
-                            Err(err) => log::warn!("[socks5] [{addr}] handshake error: {err}"),
+                            Err(err) => warn!("[socks5] [{addr}] handshake error: {err}"),
                         };
 
-                        log::debug!("[socks5] [{addr}] connection closed");
+                        debug!("[socks5] [{addr}] connection closed");
                     });
                 }
-                Err(err) => log::warn!("[socks5] failed to establish connection: {err}"),
+                Err(err) => warn!("[socks5] failed to establish connection: {err}"),
             }
         }
     }

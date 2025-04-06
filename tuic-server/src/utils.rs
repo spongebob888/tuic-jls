@@ -1,45 +1,12 @@
-use rustls_jls::{Certificate, PrivateKey};
-use rustls_pemfile::Item;
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
-    fs::{self, File},
-    io::{BufReader, Error as IoError},
-    path::PathBuf,
     str::FromStr,
 };
 
-pub fn load_certs(path: PathBuf) -> Result<Vec<Certificate>, IoError> {
-    let mut file = BufReader::new(File::open(&path)?);
-    let mut certs = Vec::new();
-
-    while let Ok(Some(item)) = rustls_pemfile::read_one(&mut file) {
-        if let Item::X509Certificate(cert) = item {
-            certs.push(Certificate(cert));
-        }
-    }
-
-    if certs.is_empty() {
-        certs = vec![Certificate(fs::read(&path)?)];
-    }
-
-    Ok(certs)
-}
-
-pub fn load_priv_key(path: PathBuf) -> Result<PrivateKey, IoError> {
-    let mut file = BufReader::new(File::open(&path)?);
-    let mut priv_key = None;
-
-    while let Ok(Some(item)) = rustls_pemfile::read_one(&mut file) {
-        if let Item::RSAKey(key) | Item::PKCS8Key(key) | Item::ECKey(key) = item {
-            priv_key = Some(key);
-        }
-    }
-
-    priv_key
-        .map(Ok)
-        .unwrap_or_else(|| fs::read(&path))
-        .map(PrivateKey)
-}
+use educe::Educe;
+use notify::{EventKind, RecommendedWatcher, Watcher};
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 
 #[derive(Clone, Copy)]
 pub enum UdpRelayMode {
@@ -56,13 +23,19 @@ impl Display for UdpRelayMode {
     }
 }
 
-pub enum CongestionControl {
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[derive(Educe)]
+#[educe(Default)]
+pub enum CongestionController {
+    #[educe(Default)]
+    Bbr,
     Cubic,
     NewReno,
-    Bbr,
 }
 
-impl FromStr for CongestionControl {
+// TODO remove in 2.0.0
+impl FromStr for CongestionController {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -76,4 +49,42 @@ impl FromStr for CongestionControl {
             Err("invalid congestion control")
         }
     }
+}
+
+pub trait FutResultExt<T, E, Fut> {
+    async fn log_err(self) -> Option<T>;
+}
+impl<T, Fut> FutResultExt<T, eyre::Report, Fut> for Fut
+where
+    Fut: std::future::Future<Output = Result<T, eyre::Report>>,
+{
+    #[inline(always)]
+    async fn log_err(self) -> Option<T> {
+        match self.await {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::error!("{:?}", e);
+                None
+            }
+        }
+    }
+}
+
+pub async fn async_watcher() -> eyre::Result<(RecommendedWatcher, broadcast::Receiver<()>)> {
+    let (tx, rx) = broadcast::channel(1);
+    let watcher = RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                match event.kind {
+                    EventKind::Create(_) | EventKind::Modify(_) => {
+                        tx.send(()).unwrap();
+                    }
+                    _ => {}
+                }
+            }
+        },
+        notify::Config::default(),
+    )?;
+
+    Ok((watcher, rx))
 }

@@ -1,35 +1,42 @@
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    sync::{Arc, atomic::AtomicU32},
+    time::Duration,
+};
+
+use anyhow::Context;
+use crossbeam_utils::atomic::AtomicCell;
+use once_cell::sync::OnceCell;
+use quinn::{
+    ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig,
+    TokioRuntime, TransportConfig, VarInt, ZeroRttAccepted,
+    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
+    crypto::rustls::QuicClientConfig,
+};
+use register_count::Counter;
+use rustls::{
+    ClientConfig as RustlsClientConfig,
+    pki_types::{CertificateDer, ServerName, UnixTime},
+};
+use tokio::{
+    sync::{OnceCell as AsyncOnceCell, RwLock as AsyncRwLock},
+    time,
+};
+use tracing::{debug, info, warn};
+use tuic_quinn::{Connection as Model, side};
+use uuid::Uuid;
+
 use crate::{
     config::Relay,
     error::Error,
     utils::{self, CongestionControl, ServerAddr, UdpRelayMode},
 };
-use crossbeam_utils::atomic::AtomicCell;
-use once_cell::sync::OnceCell;
-use parking_lot::Mutex;
-use quinn_jls::{
-    congestion::{BbrConfig, CubicConfig, NewRenoConfig},
-    ClientConfig, Connection as QuinnConnection, Endpoint as QuinnEndpoint, EndpointConfig,
-    TokioRuntime, TransportConfig, VarInt, ZeroRttAccepted,
-};
-use register_count::Counter;
-use rustls_jls::{version, ClientConfig as RustlsClientConfig};
-use std::{
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
-    sync::{atomic::AtomicU32, Arc},
-    time::Duration,
-};
-use tokio::{
-    sync::{Mutex as AsyncMutex, OnceCell as AsyncOnceCell},
-    time,
-};
-use tuic_quinn::{side, Connection as Model};
-use uuid::Uuid;
 
 mod handle_stream;
 mod handle_task;
 
-static ENDPOINT: OnceCell<Mutex<Endpoint>> = OnceCell::new();
-static CONNECTION: AsyncOnceCell<AsyncMutex<Connection>> = AsyncOnceCell::const_new();
+static ENDPOINT: OnceCell<AsyncRwLock<Endpoint>> = OnceCell::new();
+static CONNECTION: AsyncOnceCell<AsyncRwLock<Connection>> = AsyncOnceCell::const_new();
 static TIMEOUT: AtomicCell<Duration> = AtomicCell::new(Duration::from_secs(0));
 
 pub const ERROR_CODE: VarInt = VarInt::from_u32(0);
@@ -39,7 +46,9 @@ const DEFAULT_CONCURRENT_STREAMS: u32 = 32;
 pub struct Connection {
     conn: QuinnConnection,
     model: Model<side::Client>,
+    #[allow(dead_code)]
     uuid: Uuid,
+    #[allow(dead_code)]
     password: Arc<[u8]>,
     udp_relay_mode: UdpRelayMode,
     remote_uni_stream_cnt: Counter,
@@ -49,24 +58,88 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn set_config(cfg: Relay) -> Result<(), Error> {
+    pub async fn set_config(cfg: Relay) -> Result<(), Error> {
         let certs = utils::load_certs(cfg.certificates, cfg.disable_native_certs)?;
 
-        let mut crypto = RustlsClientConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_protocol_versions(&[&version::TLS13])
-            .unwrap()
-            .with_root_certificates(certs)
-            .with_no_client_auth();
+        let mut crypto = if cfg.skip_cert_verify {
+            #[derive(Debug)]
+            struct SkipServerVerification(Arc<rustls::crypto::CryptoProvider>);
+
+            impl SkipServerVerification {
+                fn new() -> Arc<Self> {
+                    Arc::new(Self(
+                        rustls::crypto::CryptoProvider::get_default()
+                            .expect("Crypto not found")
+                            .clone(),
+                    ))
+                }
+            }
+
+            impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
+                fn verify_server_cert(
+                    &self,
+                    _end_entity: &CertificateDer<'_>,
+                    _intermediates: &[CertificateDer<'_>],
+                    _server_name: &ServerName<'_>,
+                    _ocsp: &[u8],
+                    _now: UnixTime,
+                ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error>
+                {
+                    Ok(rustls::client::danger::ServerCertVerified::assertion())
+                }
+
+                fn verify_tls12_signature(
+                    &self,
+                    message: &[u8],
+                    cert: &CertificateDer<'_>,
+                    dss: &rustls::DigitallySignedStruct,
+                ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+                {
+                    rustls::crypto::verify_tls12_signature(
+                        message,
+                        cert,
+                        dss,
+                        &self.0.signature_verification_algorithms,
+                    )
+                }
+
+                fn verify_tls13_signature(
+                    &self,
+                    message: &[u8],
+                    cert: &CertificateDer<'_>,
+                    dss: &rustls::DigitallySignedStruct,
+                ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error>
+                {
+                    rustls::crypto::verify_tls13_signature(
+                        message,
+                        cert,
+                        dss,
+                        &self.0.signature_verification_algorithms,
+                    )
+                }
+
+                fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+                    self.0.signature_verification_algorithms.supported_schemes()
+                }
+            }
+            RustlsClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(SkipServerVerification::new())
+                .with_no_client_auth()
+        } else {
+            RustlsClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_root_certificates(certs)
+                .with_no_client_auth()
+        };
 
         crypto.alpn_protocols = cfg.alpn;
         crypto.enable_early_data = true;
         crypto.enable_sni = !cfg.disable_sni;
+        crypto.jls_config = rustls::JlsConfig::new(&cfg.jls_pwd, &cfg.jls_iv);
 
-        crypto.jls_config = rustls_jls::JlsConfig::new(&cfg.jls_pwd,&cfg.jls_iv);
-  
-        let mut config = ClientConfig::new(Arc::new(crypto));
+        let mut config = ClientConfig::new(Arc::new(
+            QuicClientConfig::try_from(crypto).context("no initial cipher suite found")?,
+        ));
         let mut tp_cfg = TransportConfig::default();
 
         tp_cfg
@@ -74,7 +147,16 @@ impl Connection {
             .max_concurrent_uni_streams(VarInt::from(DEFAULT_CONCURRENT_STREAMS))
             .send_window(cfg.send_window)
             .stream_receive_window(VarInt::from_u32(cfg.receive_window))
-            .max_idle_timeout(None);
+            .max_idle_timeout(None)
+            .initial_mtu(cfg.initial_mtu)
+            .min_mtu(cfg.min_mtu);
+
+        if !cfg.gso {
+            tp_cfg.enable_segmentation_offload(false);
+        }
+        if !cfg.pmtu {
+            tp_cfg.mtu_discovery_config(None);
+        }
 
         match cfg.congestion_control {
             CongestionControl::Cubic => {
@@ -90,12 +172,18 @@ impl Connection {
 
         config.transport_config(Arc::new(tp_cfg));
 
-        // Try to create an IPv4 socket as the placeholder first, if it fails, try IPv6.
-        let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))
-            .or_else(|err| {
-                UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))).map_err(|_| err)
-            })
-            .map_err(|err| Error::Socket("failed to create endpoint UDP socket", err))?;
+        let server = ServerAddr::new(cfg.server.0, cfg.server.1, cfg.ip);
+        let server_ip: Option<IpAddr> = match server.resolve().await?.next() {
+            Some(SocketAddr::V4(v4)) => Some(v4.ip().to_owned().into()),
+            Some(SocketAddr::V6(v6)) => Some(v6.ip().to_owned().into()),
+            None => None,
+        };
+        let server_ip = server_ip.expect("Server ip not found");
+        let socket = if server_ip.is_ipv4() {
+            UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)))?
+        } else {
+            UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)))?
+        };
 
         let mut ep = QuinnEndpoint::new(
             EndpointConfig::default(),
@@ -108,7 +196,7 @@ impl Connection {
 
         let ep = Endpoint {
             ep,
-            server: ServerAddr::new(cfg.server.0, cfg.server.1, cfg.ip),
+            server,
             uuid: cfg.uuid,
             password: cfg.password,
             udp_relay_mode: cfg.udp_relay_mode,
@@ -120,7 +208,7 @@ impl Connection {
         };
 
         ENDPOINT
-            .set(Mutex::new(ep))
+            .set(AsyncRwLock::new(ep))
             .map_err(|_| "endpoint already initialized")
             .unwrap();
 
@@ -129,26 +217,27 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn get() -> Result<Connection, Error> {
+    pub async fn get_conn() -> Result<Connection, Error> {
         let try_init_conn = async {
             ENDPOINT
                 .get()
                 .unwrap()
-                .lock()
+                .read()
+                .await
                 .connect()
                 .await
-                .map(AsyncMutex::new)
+                .map(AsyncRwLock::new)
         };
 
         let try_get_conn = async {
             let mut conn = CONNECTION
                 .get_or_try_init(|| try_init_conn)
                 .await?
-                .lock()
+                .write()
                 .await;
 
             if conn.is_closed() {
-                let new_conn = ENDPOINT.get().unwrap().lock().connect().await?;
+                let new_conn = ENDPOINT.get().unwrap().read().await.connect().await?;
                 *conn = new_conn;
             }
 
@@ -200,7 +289,7 @@ impl Connection {
         gc_interval: Duration,
         gc_lifetime: Duration,
     ) {
-        log::info!("[relay] connection established");
+        info!("[relay] connection established");
 
         tokio::spawn(self.clone().authenticate(zero_rtt_accepted));
         tokio::spawn(self.clone().heartbeat(heartbeat));
@@ -223,7 +312,7 @@ impl Connection {
             };
         };
 
-        log::warn!("[relay] connection error: {err}");
+        warn!("[relay] connection error: {err}");
     }
 
     fn is_closed(&self) -> bool {
@@ -238,7 +327,7 @@ impl Connection {
                 break;
             }
 
-            log::debug!("[relay] packet fragment garbage collecting event");
+            debug!("[relay] packet fragment garbage collecting event");
             self.model.collect_garbage(gc_lifetime);
         }
     }
@@ -258,36 +347,17 @@ struct Endpoint {
 }
 
 impl Endpoint {
-    async fn connect(&mut self) -> Result<Connection, Error> {
+    async fn connect(&self) -> Result<Connection, Error> {
         let mut last_err = None;
 
         for addr in self.server.resolve().await? {
             let connect_to = async {
-                let match_ipv4 =
-                    addr.is_ipv4() && self.ep.local_addr().map_or(false, |addr| addr.is_ipv4());
-                let match_ipv6 =
-                    addr.is_ipv6() && self.ep.local_addr().map_or(false, |addr| addr.is_ipv6());
-
-                if !match_ipv4 && !match_ipv6 {
-                    let bind_addr = if addr.is_ipv4() {
-                        SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
-                    } else {
-                        SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
-                    };
-
-                    self.ep
-                        .rebind(UdpSocket::bind(bind_addr).map_err(|err| {
-                            Error::Socket("failed to create endpoint UDP socket", err)
-                        })?)
-                        .map_err(|err| {
-                            Error::Socket("failed to rebind endpoint UDP socket", err)
-                        })?;
-                }
-                let server_name = match &self.server_name {
-                    Some(name) => name,
-                    None => self.server.server_name(),
-                };
-                let conn = self.ep.connect(addr, server_name)?;
+                let conn = self.ep.connect(
+                    addr,
+                    self.server_name
+                        .as_deref()
+                        .unwrap_or(self.server.server_name()),
+                )?;
                 let (conn, zero_rtt_accepted) = if self.zero_rtt_handshake {
                     match conn.into_0rtt() {
                         Ok((conn, zero_rtt_accepted)) => (conn, Some(zero_rtt_accepted)),

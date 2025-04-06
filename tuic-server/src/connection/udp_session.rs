@@ -1,38 +1,33 @@
-use super::Connection;
-use crate::error::Error;
-use bytes::Bytes;
-use parking_lot::Mutex;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::{
     io::Error as IoError,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket as StdUdpSocket},
-    sync::Arc,
+    sync::{Arc, Weak},
 };
+
+use bytes::Bytes;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::{
     net::UdpSocket,
-    sync::oneshot::{self, Sender},
+    sync::{RwLock as AsyncRwLock, oneshot},
 };
+use tracing::warn;
 use tuic::Address;
 
-#[derive(Clone)]
-pub struct UdpSession(Arc<UdpSessionInner>);
+use super::Connection;
+use crate::{AppContext, error::Error, utils::FutResultExt};
 
-struct UdpSessionInner {
+pub struct UdpSession {
+    ctx: Arc<AppContext>,
     assoc_id: u16,
     conn: Connection,
     socket_v4: UdpSocket,
     socket_v6: Option<UdpSocket>,
-    max_pkt_size: usize,
-    close: Mutex<Option<Sender<()>>>,
+    close: AsyncRwLock<Option<oneshot::Sender<()>>>,
 }
 
 impl UdpSession {
-    pub fn new(
-        conn: Connection,
-        assoc_id: u16,
-        udp_relay_ipv6: bool,
-        max_pkt_size: usize,
-    ) -> Result<Self, Error> {
+    // spawn a task which actually owns itself, then return its wake reference.
+    pub fn new(ctx: Arc<AppContext>, conn: Connection, assoc_id: u16) -> Result<Weak<Self>, Error> {
         let socket_v4 = {
             let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
                 .map_err(|err| Error::Socket("failed to create UDP associate IPv4 socket", err))?;
@@ -54,7 +49,7 @@ impl UdpSession {
             UdpSocket::from_std(StdUdpSocket::from(socket))?
         };
 
-        let socket_v6 = if udp_relay_ipv6 {
+        let socket_v6 = if ctx.cfg.udp_relay_ipv6 {
             let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))
                 .map_err(|err| Error::Socket("failed to create UDP associate IPv6 socket", err))?;
 
@@ -83,54 +78,83 @@ impl UdpSession {
 
         let (tx, rx) = oneshot::channel();
 
-        let session = Self(Arc::new(UdpSessionInner {
+        let session = Arc::new(Self {
+            ctx: ctx.clone(),
             conn,
             assoc_id,
             socket_v4,
             socket_v6,
-            max_pkt_size,
-            close: Mutex::new(Some(tx)),
-        }));
+            close: AsyncRwLock::new(Some(tx)),
+        });
 
         let session_listening = session.clone();
+        // UdpSession's real owner.
         let listen = async move {
+            let mut rx = rx;
+            let mut timeout = tokio::time::interval(ctx.cfg.stream_timeout);
+            timeout.reset();
+
             loop {
-                let (pkt, addr) = match session_listening.recv().await {
-                    Ok(res) => res,
+                let next;
+                tokio::select! {
+                    recv = session_listening.recv() => next = recv,
+                    // Avoid client didn't send `UDP-DROP` properly
+                    _ = timeout.tick() => {
+                        session_listening.close().await;
+                        warn!(
+                            "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] UDP session timeout",
+                            id = session_listening.conn.id(),
+                            addr = session_listening.conn.inner.remote_address(),
+                            user = session_listening.conn.auth,
+                        );
+                        continue;
+                    },
+                    // `UDP-DROP`
+                    _ = &mut rx => break
+                }
+                timeout.reset();
+                let (pkt, addr) = match next {
+                    Ok(v) => v,
                     Err(err) => {
-                        log::warn!(
-                            "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] outbound listening error: {err}",
-                            id = session_listening.0.conn.id(),
-                            addr = session_listening.0.conn.inner.remote_address(),
-                            user = session_listening.0.conn.auth,
+                        warn!(
+                            "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] outbound \
+                             listening error: {err}",
+                            id = session_listening.conn.id(),
+                            addr = session_listening.conn.inner.remote_address(),
+                            user = session_listening.conn.auth,
                         );
                         continue;
                     }
                 };
 
-                tokio::spawn(session_listening.0.conn.clone().relay_packet(
-                    pkt,
-                    Address::SocketAddress(addr),
-                    session_listening.0.assoc_id,
-                ));
+                tokio::spawn(
+                    session_listening
+                        .conn
+                        .clone()
+                        .relay_packet(
+                            pkt,
+                            Address::SocketAddress(addr),
+                            session_listening.assoc_id,
+                        )
+                        .log_err(),
+                );
             }
+            session_listening
+                .conn
+                .udp_sessions
+                .write()
+                .await
+                .remove(&assoc_id);
         };
 
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = listen => unreachable!(),
-                _ = rx => {},
-            }
-        });
-
-        Ok(session)
+        tokio::spawn(listen);
+        Ok(Arc::downgrade(&session))
     }
 
     pub async fn send(&self, pkt: Bytes, addr: SocketAddr) -> Result<(), Error> {
         let socket = match addr {
-            SocketAddr::V4(_) => &self.0.socket_v4,
+            SocketAddr::V4(_) => &self.socket_v4,
             SocketAddr::V6(_) => self
-                .0
                 .socket_v6
                 .as_ref()
                 .ok_or_else(|| Error::UdpRelayIpv6Disabled(addr))?,
@@ -141,27 +165,26 @@ impl UdpSession {
     }
 
     async fn recv(&self) -> Result<(Bytes, SocketAddr), IoError> {
-        async fn recv(
-            socket: &UdpSocket,
-            max_pkt_size: usize,
-        ) -> Result<(Bytes, SocketAddr), IoError> {
-            let mut buf = vec![0u8; max_pkt_size];
+        let recv = async |socket: &UdpSocket| -> Result<(Bytes, SocketAddr), IoError> {
+            let mut buf = vec![0u8; self.ctx.cfg.max_external_packet_size];
             let (n, addr) = socket.recv_from(&mut buf).await?;
             buf.truncate(n);
             Ok((Bytes::from(buf), addr))
-        }
+        };
 
-        if let Some(socket_v6) = &self.0.socket_v6 {
+        if let Some(socket_v6) = &self.socket_v6 {
             tokio::select! {
-                res = recv(&self.0.socket_v4, self.0.max_pkt_size) => res,
-                res = recv(socket_v6, self.0.max_pkt_size) => res,
+                res = recv(&self.socket_v4) => res,
+                res = recv(socket_v6) => res,
             }
         } else {
-            recv(&self.0.socket_v4, self.0.max_pkt_size).await
+            recv(&self.socket_v4).await
         }
     }
 
-    pub fn close(&self) {
-        let _ = self.0.close.lock().take().unwrap().send(());
+    pub async fn close(&self) {
+        if let Some(v) = self.close.write().await.take() {
+            _ = v.send(());
+        }
     }
 }

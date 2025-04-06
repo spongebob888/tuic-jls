@@ -1,6 +1,7 @@
-use quinn_jls::ConnectionError;
-use rustls_jls::Error as RustlsError;
 use std::{io::Error as IoError, net::SocketAddr};
+
+use quinn::ConnectionError;
+use rustls::Error as RustlsError;
 use thiserror::Error;
 use tuic_quinn::Error as ModelError;
 use uuid::Uuid;
@@ -31,6 +32,8 @@ pub enum Error {
     TaskNegotiationTimeout,
     #[error("failed sending packet to {0}: relaying IPv6 UDP packet is disabled")]
     UdpRelayIpv6Disabled(SocketAddr),
+    #[error(transparent)]
+    Other(#[from] eyre::Report),
 }
 
 impl Error {

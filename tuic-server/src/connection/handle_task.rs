@@ -1,23 +1,26 @@
-use super::{Connection, UdpSession, ERROR_CODE};
-use crate::{error::Error, utils::UdpRelayMode};
-use bytes::Bytes;
 use std::{
     collections::hash_map::Entry,
     io::{Error as IoError, ErrorKind},
     net::SocketAddr,
 };
+
+use bytes::Bytes;
+use eyre::{OptionExt, eyre};
 use tokio::{
-    io::{self, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{self, TcpStream},
 };
-use tokio_util::compat::FuturesAsyncReadCompatExt;
+use tracing::{info, warn};
 use tuic::Address;
 use tuic_quinn::{Authenticate, Connect, Packet};
 
+use super::{Connection, ERROR_CODE, UdpSession};
+use crate::{error::Error, io::exchange_tcp, restful, utils::UdpRelayMode};
+
 impl Connection {
     pub async fn handle_authenticate(&self, auth: Authenticate) {
-        log::info!(
-            "[{id:#010x}] [{addr}] [{user}] [authenticate] {auth_uuid}",
+        info!(
+            "[{id:#010x}] [{addr}] [{user}] [AUTH] {auth_uuid}",
             id = self.id(),
             addr = self.inner.remote_address(),
             user = self.auth,
@@ -25,11 +28,11 @@ impl Connection {
         );
     }
 
-    pub async fn handle_connect(&self, conn: Connect) {
+    pub async fn handle_connect(&self, mut conn: Connect) {
         let target_addr = conn.addr().to_string();
 
-        log::info!(
-            "[{id:#010x}] [{addr}] [{user}] [connect] {target_addr}",
+        info!(
+            "[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr} ",
             id = self.id(),
             addr = self.inner.remote_address(),
             user = self.auth,
@@ -44,6 +47,7 @@ impl Connection {
                     for addr in addrs {
                         match TcpStream::connect(addr).await {
                             Ok(s) => {
+                                s.set_nodelay(true)?;
                                 stream = Some(s);
                                 break;
                             }
@@ -55,14 +59,28 @@ impl Connection {
             }
 
             if let Some(mut stream) = stream {
-                let mut conn = conn.compat();
-                let res = io::copy_bidirectional(&mut conn, &mut stream).await;
-                let _ = conn.get_mut().reset(ERROR_CODE);
-                let _ = stream.shutdown().await;
-                res?;
-                Ok::<_, Error>(())
+                // a -> b tx
+                // a <- b rx
+                let (tx, rx, err) = exchange_tcp(&mut conn, &mut stream).await;
+                if err.is_some() {
+                    _ = conn.reset(ERROR_CODE);
+                } else {
+                    _ = conn.finish();
+                }
+                _ = stream.shutdown().await;
+
+                let uuid = self
+                    .auth
+                    .get()
+                    .ok_or_eyre("Unexpected autherization state")?;
+                restful::traffic_tx(&self.ctx, &uuid, tx as u64);
+                restful::traffic_rx(&self.ctx, &uuid, rx as u64);
+                if let Some(err) = err {
+                    return Err(err);
+                }
+                Ok(())
             } else {
-                let _ = conn.compat().shutdown().await;
+                let _ = conn.shutdown().await;
                 Err(last_err
                     .unwrap_or_else(|| IoError::new(ErrorKind::NotFound, "no address resolved")))?
             }
@@ -70,8 +88,8 @@ impl Connection {
 
         match process.await {
             Ok(()) => {}
-            Err(err) => log::warn!(
-                "[{id:#010x}] [{addr}] [{user}] [connect] {target_addr}: {err}",
+            Err(err) => warn!(
+                "[{id:#010x}] [{addr}] [{user}] [TCP] {target_addr}: {err}",
                 id = self.id(),
                 addr = self.inner.remote_address(),
                 user = self.auth,
@@ -85,22 +103,24 @@ impl Connection {
         let frag_id = pkt.frag_id();
         let frag_total = pkt.frag_total();
 
-        log::info!(
-            "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment {frag_id}/{frag_total}",
+        info!(
+            "[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] \
+             [{pkt_id:#06x}] fragment {frag_id}/{frag_total}",
             id = self.id(),
             addr = self.inner.remote_address(),
             user = self.auth,
             frag_id = frag_id + 1,
         );
 
-        self.udp_relay_mode.store(Some(mode));
+        self.udp_relay_mode.store(Some(mode).into());
 
         let (pkt, addr, assoc_id) = match pkt.accept().await {
             Ok(None) => return,
             Ok(Some(res)) => res,
             Err(err) => {
-                log::warn!(
-                    "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] fragment {frag_id}/{frag_total}: {err}",
+                warn!(
+                    "[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] \
+                     [{pkt_id:#06x}] fragment {frag_id}/{frag_total}: {err}",
                     id = self.id(),
                     addr = self.inner.remote_address(),
                     user = self.auth,
@@ -111,38 +131,52 @@ impl Connection {
         };
 
         let process = async {
-            log::info!(
-                "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}",
+            info!(
+                "[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] \
+                 [{pkt_id:#06x}] to {src_addr}",
                 id = self.id(),
                 addr = self.inner.remote_address(),
                 user = self.auth,
                 src_addr = addr,
             );
 
-            let session = match self.udp_sessions.lock().entry(assoc_id) {
-                Entry::Occupied(entry) => entry.get().clone(),
-                Entry::Vacant(entry) => {
-                    let session = UdpSession::new(
-                        self.clone(),
-                        assoc_id,
-                        self.udp_relay_ipv6,
-                        self.max_external_pkt_size,
-                    )?;
-                    entry.insert(session.clone());
-                    session
-                }
+            let guard = self.udp_sessions.read().await;
+            let session = guard.get(&assoc_id).map(|v| v.to_owned());
+            drop(guard);
+            let session = match session {
+                Some(v) => v,
+                None => match self.udp_sessions.write().await.entry(assoc_id) {
+                    Entry::Occupied(entry) => entry.get().clone(),
+                    Entry::Vacant(entry) => {
+                        let session = UdpSession::new(self.ctx.clone(), self.clone(), assoc_id)?;
+                        entry.insert(session.clone());
+                        session
+                    }
+                },
             };
 
             let Some(socket_addr) = resolve_dns(&addr).await?.next() else {
-                return Err(Error::from(IoError::new(ErrorKind::NotFound, "no address resolved")));
+                return Err(Error::from(IoError::new(
+                    ErrorKind::NotFound,
+                    "no address resolved",
+                )));
             };
-
-            session.send(pkt, socket_addr).await
+            let uuid = self
+                .auth
+                .get()
+                .ok_or_eyre("Unexpected autherization state")?;
+            restful::traffic_tx(&self.ctx, &uuid, pkt.len() as u64);
+            if let Some(session) = session.upgrade() {
+                session.send(pkt, socket_addr).await
+            } else {
+                Err(eyre!("UdpSession dropped already").into())
+            }
         };
 
         if let Err(err) = process.await {
-            log::warn!(
-                "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] [from-{mode}] [{pkt_id:#06x}] to {src_addr}: {err}",
+            warn!(
+                "[{id:#010x}] [{addr}] [{user}] [UDP-OUT] [{assoc_id:#06x}] [from-{mode}] \
+                 [{pkt_id:#06x}] to {src_addr}: {err}",
                 id = self.id(),
                 addr = self.inner.remote_address(),
                 user = self.auth,
@@ -152,37 +186,45 @@ impl Connection {
     }
 
     pub async fn handle_dissociate(&self, assoc_id: u16) {
-        log::info!(
-            "[{id:#010x}] [{addr}] [{user}] [dissociate] [{assoc_id:#06x}]",
+        info!(
+            "[{id:#010x}] [{addr}] [{user}] [UDP-DROP] [{assoc_id:#06x}]",
             id = self.id(),
             addr = self.inner.remote_address(),
             user = self.auth,
         );
 
-        if let Some(session) = self.udp_sessions.lock().remove(&assoc_id) {
-            session.close();
+        if let Some(session) = self.udp_sessions.write().await.remove(&assoc_id)
+            && let Some(session) = session.upgrade()
+        {
+            session.close().await;
         }
     }
 
     pub async fn handle_heartbeat(&self) {
-        log::info!(
-            "[{id:#010x}] [{addr}] [{user}] [heartbeat]",
+        info!(
+            "[{id:#010x}] [{addr}] [{user}] [HB]",
             id = self.id(),
             addr = self.inner.remote_address(),
             user = self.auth,
         );
     }
 
-    pub async fn relay_packet(self, pkt: Bytes, addr: Address, assoc_id: u16) {
+    pub async fn relay_packet(self, pkt: Bytes, addr: Address, assoc_id: u16) -> eyre::Result<()> {
         let addr_display = addr.to_string();
 
-        log::info!(
-            "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] [to-{mode}] from {src_addr}",
+        info!(
+            "[{id:#010x}] [{addr}] [{user}] [UDP-IN] [{assoc_id:#06x}] [to-{mode}] from {src_addr}",
             id = self.id(),
             addr = self.inner.remote_address(),
             user = self.auth,
             mode = self.udp_relay_mode.load().unwrap(),
             src_addr = addr_display,
+        );
+
+        restful::traffic_rx(
+            &self.ctx,
+            &self.auth.get().ok_or_eyre("Unreachable")?,
+            pkt.len() as u64,
         );
 
         let res = match self.udp_relay_mode.load().unwrap() {
@@ -191,8 +233,9 @@ impl Connection {
         };
 
         if let Err(err) = res {
-            log::warn!(
-                "[{id:#010x}] [{addr}] [{user}] [packet] [{assoc_id:#06x}] [to-{mode}] from {src_addr}: {err}",
+            warn!(
+                "[{id:#010x}] [{addr}] [{user}] [UDP-IN] [{assoc_id:#06x}] [to-{mode}] from \
+                 {src_addr}: {err}",
                 id = self.id(),
                 addr = self.inner.remote_address(),
                 user = self.auth,
@@ -200,6 +243,7 @@ impl Connection {
                 src_addr = addr_display,
             );
         }
+        Ok(())
     }
 }
 

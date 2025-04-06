@@ -1,23 +1,26 @@
-//! An abstraction of a TUIC connection, with packet fragmentation management and task counters. No I/O operation is involved internally
+//! An abstraction of a TUIC connection, with packet fragmentation management
+//! and task counters. No I/O operation is involved internally
 
-use crate::{
-    Address, Authenticate as AuthenticateHeader, Connect as ConnectHeader,
-    Dissociate as DissociateHeader, Heartbeat as HeartbeatHeader, Packet as PacketHeader,
-};
-use parking_lot::Mutex;
-use register_count::{Counter, Register};
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter, Result as FmtResult},
     mem,
     sync::{
-        atomic::{AtomicU16, Ordering},
         Arc,
+        atomic::{AtomicU16, Ordering},
     },
     time::{Duration, Instant},
 };
+
+use parking_lot::Mutex;
+use register_count::{Counter, Register};
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::{
+    Address, Authenticate as AuthenticateHeader, Connect as ConnectHeader,
+    Dissociate as DissociateHeader, Heartbeat as HeartbeatHeader, Packet as PacketHeader,
+};
 
 mod authenticate;
 mod connect;
@@ -33,7 +36,8 @@ pub use self::{
     packet::{Fragments, Packet},
 };
 
-/// An abstraction of a TUIC connection, with packet fragmentation management and task counters. No I/O operation is involved internally
+/// An abstraction of a TUIC connection, with packet fragmentation management
+/// and task counters. No I/O operation is involved internally
 #[derive(Clone)]
 pub struct Connection<B> {
     udp_sessions: Arc<Mutex<UdpSessions<B>>>,
@@ -156,7 +160,8 @@ where
         self.task_associate_count.count()
     }
 
-    /// Removes fragments that can not be reassembled within the specified timeout
+    /// Removes fragments that can not be reassembled within the specified
+    /// timeout
     pub fn collect_garbage(&self, timeout: Duration) {
         self.udp_sessions.lock().collect_garbage(timeout);
     }

@@ -14,14 +14,13 @@ TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables
     "relay": {
         // TUIC config
         "server": "example.com:443",
-        "uuid": "00000000-0000-0000-0000-000000000000",
-        "password": "PASSWORD",
+        "uuid": "00000000-0000-0000-0000-000000000000", // Any is OK,TUIC-JLS will skip this
+        "password": "PASSWORD",                         // Any is OK
         "ip": "127.0.0.1",
-        "certificates": ["PATH/TO/CERTIFICATE_1", "PATH/TO/CERTIFICATE_2"],
         "udp_relay_mode": "native",
-        "congestion_control": "cubic",
-        "alpn": ["h3", "spdy/3.1"],
-        "zero_rtt_handshake": false,
+        "congestion_control": "bbr",
+        "alpn": ["h3"],
+        "zero_rtt_handshake": true,
         "disable_sni": false,
         "timeout": "8s",
         "heartbeat": "3s",
@@ -32,10 +31,10 @@ TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables
         "gc_lifetime": "15s",
 
         // JLS password
-        "jls_pwd": "123",
-	    "jls_iv":"123",
+        "jls_pwd": "123",           // Must be the same as server 
+	    "jls_iv":"123",             // Must be the same as server
         // SNI
-	    "server_name": "codepen.io"
+	    "server_name": "codepen.io" // Must be the same as server jls_upstream
     },
 
     // Settings for the local inbound socks5 server
@@ -57,14 +56,10 @@ TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables
     // TUIC config
     "server": "[::]:443",
     "users": {
-        "00000000-0000-0000-0000-000000000000": "PASSWORD_0",
-        "00000000-0000-0000-0000-000000000001": "PASSWORD_1"
+        "00000000-0000-0000-0000-000000000000": "PASSWORD_0", //Any is ok TUIC-JLS will skip this
     },
-    // Optional. If empty, certificate will be generated automaticly
-    "certificate": "PATH/TO/CERTIFICATE",
-    // Optional. If empty, certificate will be generated automaticly
-    "private_key": "PATH/TO/PRIVATE_KEY",
-    "congestion_control": "cubic",
+    "self_sign": true,  // TUIC-JLS use self-signd certificate
+    "congestion_control": "bbr",
     "alpn": ["h3", "spdy/3.1"],
     "udp_relay_ipv6": true,
     "zero_rtt_handshake": false,
@@ -83,13 +78,13 @@ TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables
     "jls_pwd":"123",
     "jls_iv":"123",
     // JLS camouflae server
-    "jls_upstream":"https://codepen.io"
+    "jls_upstream":"codepen.io:443" // port is a must
 
 }
 ```
 
 # About JLS
-[JLS](https://github.com/JimmyHuang454/JLS) is a simple FakeTLS protocol which encodes identity verfication in the Random field of the ClientHello and ServerHello.
+[JLS](https://github.com/JimmyHuang454/JLS) is a simple FakeTLS protocol which encodes identity verfication in the Random field of the ClientHello and ServerHello. Its security peformance is the same as tls1.3
 
 # Potential Risk
 - see [quinn-jls](https://github.com/spongebob888/quinn-jls)
