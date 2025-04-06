@@ -78,7 +78,7 @@ TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables
     "jls_pwd":"123",
     "jls_iv":"123",
     // JLS camouflae server
-    "jls_upstream":"https://codepen.io"
+    "jls_upstream":"codepen.io:443" // port is a must
 
 }
 ```
