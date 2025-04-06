@@ -146,6 +146,7 @@ tuic-client -c PATH/TO/CONFIG
 
         // Optional. Set the password for socks5 authentication
         "password": "PASSWORD",
+
         // Optional. Set if the listening socket should be dual-stack
         // If this option is not set, the socket behavior is platform dependent
         "dual_stack": true,
