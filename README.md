@@ -1,4 +1,6 @@
 # TUIC-JLS
+> This project is discontinued. Consider the brand-new protocol [ShadowQUIC](https://github.com/spongebob888/shadowquic)
+
 TUIC protocol based on [JLS](https://github.com/JimmyHuang454/JLS) which enables：
 - SNI camouflage
 - Anti active detection
